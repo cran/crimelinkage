@@ -1,0 +1,56 @@
+citHeader( "To cite crimelinkage in publications use:" )
+
+
+citEntry(
+      entry     = "Article",
+      title     = "A Statistical Approach to Crime Linkage",
+      author    = personList(as.person("Michael D. Porter")),
+      year      = "2014",
+      Eprint    = "1410.2285",
+      Eprinttype= "arxiv",
+      Urldate   = "2014-10-08",
+      journal   = "arXiv preprint",
+      textVersion  =
+      paste("Porter, M.D. (2014).",
+            "A Statistical Approach to Crime Linkage",
+            "arXiv preprint arXiv:1410.2285.")
+   )
+
+
+citEntry(
+      entry     = "Article",
+      title     = "Partially supervised spatiotemporal clustering for burglary crime series identification",
+      author    = personList(as.person("Brian J. Reich"),as.person("Michael D. Porter")),
+      journal   = "Journal of the Royal Statistical Society: Series A",
+      year      = "2015",
+      volume    = "178",
+      number    = "2",
+      pages     = "465--480",
+      textVersion  =
+      paste("Reich, B. J., & Porter, M. D. (2015).",
+                    "Partially supervised spatiotemporal clustering for burglary crime series identification.", "Journal of the Royal Statistical Society: Series A (Statistics in Society),",
+                    "178(2), 465-480.")
+   )
+
+
+
+
+citEntry(
+      entry     = "TechReport",
+      title     = "Statistical Methods for Crime Series Linkage",
+      author    = personList(as.person("Michael D. Porter"),
+                         as.person("Brian J. Reich")),
+      institution = "U.S. Department of Justice, Office of Justice Programs",
+      address     = paste("National Institute of Justice",
+                          "810 Seventh Street N.W.,",
+                          "Washington, DC 20531"),
+      year         = "2014",
+
+      textVersion  =
+      paste("Porter, M.D. and Reich B.J. (2014).",
+            "Statistical Methods for Crime Series Linkage",
+            "NIJ Technical Report")
+   )
+
+citFooter("We gratefully acknowledge the support of the National Institute of Justice: 2010-DE-BX-K255.")
+

@@ -1,0 +1,263 @@
+---
+title: "Statistical Methods for Crime Series Linkage"
+author: "Michael D. Porter"
+date: "March 20, 2015"
+output: rmarkdown::html_vignette
+bibliography: refs.bib
+vignette: >
+  %\VignetteIndexEntry{Statistical Methods for Crime Series Linkage}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\usepackage[utf8]{inputenc}
+  %\SweaveUTF8
+---
+
+```{r, echo = FALSE, message = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, echo=TRUE,comment = "#>")
+library(crimelinkage)
+CACHE = FALSE # Set TRUE for development, then set to FALSE for release
+```
+
+## Introduction to the `crimelinkage` package
+The `crimelinkage` package^[This work was supported by the National Institute of Justice project 2010-DE-BX-K255: *Statistical Methods for Crime Series Linkage*.] is a set of tools to help crime analysts and researchers with tasks related to crime linkage. This package specifically includes methods for criminal case linkage,  crime series identification and clustering, and suspect identification. 
+More details about the methodology and its performance on actual crime data can be found in [@NIJreport; @CaseLinkage; @CrimeClust; @Consistency] 
+
+
+The object of the `crimelinkage` package is to provide a statistical approach to criminal linkage analysis that discovers and groups crime events that share a common offender and prioritizes suspects for further investigation. Bayes factors are used to describe the strength of evidence that two crimes are linked. Using concepts from agglomerative hierarchical clustering, the Bayes factors for crime pairs can be combined to provide similarity measures for comparing two crime series. This facilitates crime series clustering, crime series identification, and suspect prioritization.
+
+
+
+
+## Getting Started
+Make sure you have installed and loaded the `crimelinkage` package. 
+```{r}
+#- If the crimelinkage package is not installed, type: install.packages{"crimelinkage"}
+library(crimelinkage)
+```
+
+Crime linkage will require two primary data sets: one with crime incidents and the other that links offenders with the crimes they have committed. `crimelinkage` has some fictitious data (named `crimes` and `offenders`) that can help illustrate how the various linkage methods work.
+The `crimes` data is a `data.frame` of 490 simulated crime events. You can get the first 6 records by typing:
+```{r}
+data(crimes)
+head(crimes)
+```
+Each crime has an ID number, spatial coordinates, 3 categorical MO features, a temporal window of when the crime could have occurred, and the width of the time window. More details about these fields can be found by typing `?crimes`. An `NA` indicates the record is missing a value. 
+
+The `offenders` data links the solved crimes to the offender(s). 
+```{r}
+data(offenders)
+head(offenders)
+```
+
+The crimes series from an individual offender can be extracted using `getCrimeSeries`. For example, offender O:40 has committed four known crimes. 
+```{r}
+cs = getCrimeSeries("O:40",offenders)
+cs
+```
+If we want to see the actual incident data, use the function `getCrimes()`
+```{r}
+getCrimes("O:40",crimes,offenders)
+```
+
+Co-offenders can be identified with the `getCriminals()` function. For example, offender O:40 has four known co-offenders
+```{r}
+getCriminals(cs$crimeID,offenders)
+```
+We can also examine all offenders of a *particular* crime,
+```{r}
+getCriminals("C:78",offenders)
+```
+
+
+
+## Pairwise Case Linkage
+*Pairwise case linkage* is the processes of determining if a given pair of crimes share the same offender. This is a binary classification problem where each crime pair is considered independently. In order to carry out pairwise case linkage, crime pairs must be compared and evidence variables created.
+
+### Making Crime Series Data
+The first step is to combine all the crime and offender data using the `makeSeriesData()` function:
+```{r seriesData}
+seriesData = makeSeriesData(crimedata=crimes,offenderTable=offenders)
+```
+
+> Note that the data.frame passed into `crimedata=` must at minimum have columns (exactly) named: `crimeID`, `DT.FROM`, and `DT.TO`. The `crimeID` column should be a character vector indicating the crime identification number. The `DT.FROM` and `DT.TO` columns should be datetime objects of class `POSIXct`. See the functions `getDateTime()` and 
+`fixDateTime()` for details on converting date-time data into the proper format.
+
+
+From the series data, we can get some useful information about the offenders and crime series. For example, 
+```{r}
+nCrimes = table(seriesData$offenderID)  # length of each crime series
+table(nCrimes)                  # distribution of crime series length
+mean(nCrimes>1)                 # proportion of offenders with multiple crimes
+```
+provides some info on the length of crime series. From this, we see that `r table(nCrimes)[1]` offenders were charged with only one crime, `r table(nCrimes)[2]` were charged with two crimes, and the proportion of offenders that had multiple crimes in the data is `r round(mean(nCrimes>1),3)`.
+
+The rate of co-offending can also be examined with the following commands: 
+```{r}
+nCO = table(seriesData$crimeID) # number of co-offenders per crime
+table(nCO)                      # distribution of number of co-offenders
+mean(nCO>1)                     # proportion of crimes with multiple co-offenders
+```
+We see that `r table(nCO)[1]` crimes were committed by a single offender and 
+`r 100*round(mean(nCO>1),3)`% of crimes had multiple offenders.
+
+
+### Creating Evidence Variables
+Case linkage compares the variables from two crimes to assess their level of similarity and distinctiveness. To facilitate this comparison, the crime variables for a pair of crimes need to be transformed and converted into *evidence variables* that are more suitable for case linkage analysis [@CaseLinkage]. 
+
+
+The first step is to get the crimes pairs we want to compare. The function `makePairs()` is used to get the linked and unlinked pairs that will be used to build a case linkage model.
+```{r, get.indices,cache=CACHE}
+set.seed(1)         # set random seed for replication
+allPairs = makePairs(seriesData,thres=365,m=40)
+```
+The crime pairs are restricted to occur no more that 365 days apart. The threshold `thres` is used to minimize the effects of offenders that may change their preferences (e.g., home location) over time. The crime pairs only include solved crimes.
+
+The linked pairs (crimes committed by same offender) have `type = 'linked'`. For these, the `weight` column corresponds to $1/N$, where $N$ is the number of crime pairs in a series. These weights will be used when we construct the case linkage models. This attempts to put all crime series on an equal footing by downweighting the crime pairs from offenders with large crime series.
+
+The unlinked pairs (`type = 'unlinked'`) were generated by selecting `m = 40` crimes from each crime group and comparing them to crimes in different crime groups. Crime groups are the connected components of the oﬀender graph. This approach helps prevent (unknown) linked crimes from being included in the unlinked data. The weights for unlinked pairs are 1. 
+
+This generates `r sum(allPairs$type=="linked")` linked pairs and `r sum(allPairs$type=="unlinked")` unlinked pairs, with weights. 
+
+
+The next step is to compare all crime pairs using the function `compareCrimes()`. Crime $V_i$ is compared to crime $V_j$ (rows from crime incident data) and evidence variables are created that measure the similarity or dissimilarity of the two crimes across their attributes. 
+More information about how the evidence variables are made can be found in the help for `?compareCrimes`. Note that `varnames` refers to specific column names in the `crimes` data. 
+```{r make.linkage.data, cache=CACHE, results='hide'}
+varnames = list(    
+  spatial = c("X", "Y"),
+  temporal = c("DT.FROM","DT.TO"),
+  categorical = c("MO1",  "MO2", "MO3"))
+
+X = compareCrimes(allPairs,crimes,varnames,binary=TRUE,seed=2)   # Evidence data
+Y = ifelse(X$type=='linked',1,0)      # Linkage indicator. 1=linkage, 0=unlinked
+```
+
+
+This information is now in the correct format for building classification models for case linkage. 
+```{r}
+head(X)
+table(Y)         
+```
+
+
+
+### Fitting Classification Models for Case Linkage
+Now that we have the linkage data in a suitable format, we can build case linkage (i.e., classification) models and compare their performance. First, partition the linkage data into training (70\%) and testing (30\%) sets and create a data.frame `D.train` containing the training data:
+```{r}
+set.seed(3)                                        # set random seed for replication
+train = sample(c(TRUE,FALSE),nrow(X),replace=TRUE,prob=c(.7,.3))  # assign pairs to training set
+test = !train
+D.train = data.frame(X[train,],Y=Y[train])          # training data
+```
+
+Technically, any binary classification model can be used for case linkage (as long as it accepts weighted observations^[If a classification method can't handle weighted observations then sampling can be used.]). We will illustrate with three models: logistic regression (with stepwise selection), naive Bayes, and boosted trees. 
+
+Make the formula for the models
+```{r}
+vars = c("spatial","temporal","tod","dow","MO1","MO2","MO3") 
+fmla.all = as.formula(paste("Y ~ ", paste(vars, collapse= "+")))
+fmla.all
+```
+
+#### Logistic Regression (with stepwise variable selection)
+Fit stepwise logistic regression using the `glm()` and `step()` functions:
+```{r logistic.regression, message=FALSE,warning=FALSE}
+fit.logistic = glm(fmla.all,data=D.train,family=binomial,weights=weight) 
+fit.logisticstep = step(fit.logistic,trace=0)
+summary(fit.logisticstep)
+```
+The stepwise procedure only chooses the spatial and temporal distance and MO1.
+
+#### Naive Bayes
+A naive Bayes model can be constructed with the `naiveBays()` function. This function fits a non-parametric naive Bayes model which bins the continuous predictors and applies a shrinkage to control the complexity. The `df=` argument is the degrees of freedom for each predictor, `nbins=` is the number of bins to use for continuous predictors, and `partition=` controls how the bins are constructed. The resulting component plots can be made with the `plotBF()` function.
+
+Here we fit a naive Bayes model with up to 10 degrees of freedom for each component using 15 bins which are designed to have approximately equal number of training points in each bin (quantile binning). 
+```{r, results='hold',fig.keep='high',fig.show='hold',fig.width=7,fig.height=4, out.width="100%"}
+NB = naiveBayes(vars,D.train,df=10,nbins=15,partition='quantile')
+
+#- Component Plots
+par(mfrow=c(3,3),mar=c(2,4,2,2))
+plotBF(NB$spatial,ylim=c(-2,2)); title("spatial")
+plotBF(NB$temporal,show.legend=FALSE,ylim=c(-2,2)) ; title("temporal")
+plotBF(NB$tod,show.legend=FALSE,ylim=c(-2,2)); title("Time of Day")
+plotBF(NB$dow,show.legend=FALSE,ylim=c(-2,2)); title("Day of Week")
+plotBF(NB$MO1,show.legend=FALSE,ylim=c(-2,2)); title("MO1")
+plotBF(NB$MO2,show.legend=FALSE,ylim=c(-2,2)); title("MO2")
+plotBF(NB$MO3,show.legend=FALSE,ylim=c(-2,2)); title("MO3")
+```
+The naive Bayes model also gives the strongest influence to the spatial and temporal distances and MO1.
+
+
+#### Boosted Trees
+Fit boosted trees with the `gbm()` function in the `gbm` package. This package needs to be installed if not already done so. 
+```{r gbm, cache=FALSE, results='hide',fig.keep='none',fig.show='hold',fig.width=6,fig.height=6,message=FALSE,warning=FALSE}
+library(gbm) # if not installed type: install.packages("gbm")
+set.seed(4)
+fit.gbm = gbm(fmla.all,distribution="bernoulli",data=D.train,weights=weight,
+              shrinkage=.01,n.trees=500,interaction.depth=4)
+nt.opt = fit.gbm$n.trees     # see gbm.perf() for better options
+
+#- Relative influence and plot
+print(relative.influence(fit.gbm,n.trees=nt.opt))
+par(mfrow=c(2,4))
+for(i in 1:7) plot(fit.gbm,i)
+```
+The boosted tree model uses an interaction depth of 4 (allowing up to 4 way interactions). It finds that the spatial and temporal distance variables have the strongest influence. 
+
+
+
+### Evaluating Models for Case Linkage
+The models can be evaluated on the test data. 
+```{r}
+D.test = data.frame(Y=Y[test],X[test,])
+X.test = D.test[,vars]
+Y.test = D.test[,"Y"]
+```
+
+Now, we will predict the values of the Bayes factor (up to constant) from each method and store in an object called `BF`. The predictions are evaluated with `getROC()`:
+```{r}
+#- Predict the Bayes factor for each model
+BF = data.frame(
+  logisticstep = predict(fit.logisticstep,newdata=X.test,type='link'),
+  nb = predictNB(NB,X.test),
+  gbm = predict.gbm(fit.gbm,newdata=X.test,n.trees=nt.opt)
+  )
+
+#- Evaluation via ROC like metrics
+roc = apply(BF,2,function(x) getROC(x,Y.test))
+```
+
+For each model, the `getROC()` function orders the crime pairs in the testing set according to their estimated Bayes Factor and the predictive performance is determined from the number of actual linkages found in the ordered list.
+The first plot shows the proportion of all linked crimes that are correctly identified (True Positive Rate) if a certain number of crime pairs are investigated.
+```{r,fig.show='hold',fig.width=10, out.width="100%"}
+with(roc[[1]], plot(Total,TPR,typ='l',xlim=c(0,1000),ylim=c(0,1),las=1,
+                    xlab='Total Cases Examined',ylab='True Positive Rate'))
+grid()
+for(i in 2:length(roc)){
+  with(roc[[i]], lines(Total,TPR,col=i))
+}
+legend('topleft',names(roc),col=1:length(roc),lty=1, cex=.75,bty="n")
+title("Proportion of overall linked crimes captured")
+```
+
+
+The next plot shows the proportion of the ordered crime pairs that are actual linkages (Precision) for a given number of cases examined.
+```{r,fig.show='hold',fig.width=10, out.width="100%"}
+with(roc[[1]], plot(Total,PPV,typ='l',xlim=c(0,1000),ylim=c(0,1),las=1,
+                    xlab='Total Cases Examined',ylab='Precision'))
+grid()
+for(i in 2:length(roc)){
+  with(roc[[i]], lines(Total,PPV,col=i))
+}
+legend('topright',names(roc),col=1:length(roc),lty=1, cex=.75,bty="n")
+title("Proportion of identified crimes that are actually linked")
+```
+
+
+
+## More Functionality
+The purpose of this analysis is to illustrate some capabilities of the `crimelinkage` package for **pairwise case linkage**. 
+More functionality will be shown in other vignettes.
+
+
+
+## References
+
