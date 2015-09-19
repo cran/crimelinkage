@@ -3,27 +3,27 @@
 ##==============================================================================
 #' Bayesian model-based partially-supervised clustering for crime series identification
 #'
-#'  @param criminal n-vector of criminal IDs for the n crimes in the dataset.
+#'  @param crimeID n-vector of criminal IDs for the n crimes in the dataset.
 #'    For unsolved crimes, the value should be \code{NA}.
-#'  @param s (n x 2) matrix of spatial locations, represent missing locations
+#'  @param spatial (n x 2) matrix of spatial locations, represent missing locations
 #'    with \code{NA}
 #'  @param t1 earliest possible time for crime
 #'  @param t2 latest possible time for crime. Crime occurred between \code{t1}
 #'    and \code{t2}.
-#'  @param Xnorm (n x p) matrix of continuous crime features.  
 #'  @param Xcat (n x q) matrix of categorical crime features.  Each column is a
 #'    variable, such as mode of entry.  The different factors (window, door, etc)
 #'    should be coded as integers 1,2,\dots,m.
-#'  @param use_space  (logical) should the spatial locations be used in clustering?
-#'  @param use_time	(logical) should the event times be used in clustering?
-#'  @param use_cats (logical) should the categorical crime features be used in
-#'    clustering?
+#'  @param Xnorm (n x p) matrix of continuous crime features.  
 #'  @param maxcriminals maximum number of clusters in the model.
 #'  @param iters Number of MCMC samples to generate.
 #'  @param burn	Number of MCMC samples to discard as burn-in.
 #'  @param plot (logical) Should plots be produced during run.
 #'  @param update	Number of MCMC iterations between graphical displays.
 #'  @param seed seed for random number generation 
+#'  @param use_space  (logical) should the spatial locations be used in clustering?
+#'  @param use_time  (logical) should the event times be used in clustering?
+#'  @param use_cats (logical) should the categorical crime features be used in
+#'    clustering?  
 #'  @return (list) p.equal is the (n x n) matrix of probabilities that each pair of
 #'    crimes are committed by the same criminal.
 #'    
@@ -71,7 +71,7 @@
 #'  id <- c(NA,1,1,NA,2,NA,2,NA,3,3,3,NA)
 #'  
 #'  # Fit the model (nb: use much larger iters and burn on real problem)
-#'  fit <- crimeClust_bayes(criminal=id, s=s, t1=t,t2=t, Xcat=Xcat, 
+#'  fit <- crimeClust_bayes(crimeID=id, spatial=s, t1=t,t2=t, Xcat=Xcat, 
 #'                    maxcriminals=12,iters=500,burn=100,update=100)
 #'                    
 #'  # Plot the posterior probability matrix that each pair of crimes was 
@@ -89,10 +89,57 @@
 ##  Check Xnorm, this was originally set up really to hold time. But needs extending 
 ##   to general. use_time should also include use_norm, etc. 
 ##==============================================================================
-crimeClust_bayes<-function(criminal,s,t1,t2,Xnorm,Xcat,
-            use_space=TRUE,use_time=TRUE,use_cats=TRUE,
-            maxcriminals=1000,
-            iters=10000,burn=5000,plot=TRUE,update=100,seed=NULL){
+crimeClust_bayes<-function(crimeID,spatial,t1,t2,Xcat,Xnorm,
+                           maxcriminals=1000,iters=10000,burn=5000,
+                           plot=TRUE,update=100,seed=NULL,
+                           use_space=TRUE,use_time=TRUE,use_cats=TRUE){
+  
+#----------- Helper Functions ------------------
+  ## taken from MCMCpack package
+  rdirichlet <- function (n, alpha) {
+      l <- length(alpha)
+      x <- matrix(rgamma(l * n, alpha), ncol = l, byrow = TRUE)
+      sm <- x %*% rep(1, l)
+      return(x/as.vector(sm))
+  }
+  
+  ddir<-function(y,df,p){
+     alpha<-df*p
+     lll<-lgamma(sum(alpha))+sum(alpha*log(y)) - sum(lgamma(alpha))
+  lll}
+  
+  count<-function(j,y){sum(y==j)}
+  
+  get.counts<-function(y,M){
+         sapply(1:M,count,y=y)
+  }
+  sum.by.g<-function(y,g,M){
+     unig<-sort(unique(g))
+     sss<-rep(0,M)
+     sss[unig]<-tapply(y,g,sum)
+  sss}
+  
+  count.g<-function(g,M){
+     unig<-sort(unique(g))
+     sss<-rep(0,M)
+     sss[unig]<-table(g)
+  sss}
+  
+  #Draw samples from a truncated normal:
+  rtruncnorm<-function(n,mu,sigma,lower,upper){
+     lp<-pnorm(lower,mu,sigma)
+     up<-pnorm(upper,mu,sigma)
+     y<-qnorm(runif(n,lp,up),mu,sigma)
+  y}
+  
+  ddir2<-function(probs,D){
+    k<-length(probs)
+    lgamma(k*D)-k*lgamma(D)+(D-1)*sum(log(probs))
+  }
+
+#-------------------------------------------------  
+  
+  
   
   if(!is.null(seed)) set.seed(seed)
   if(missing(Xnorm)) Xnorm = NULL
@@ -104,13 +151,12 @@ crimeClust_bayes<-function(criminal,s,t1,t2,Xnorm,Xcat,
     if("POSIXct" %in% class(t2)) t2 = as.numeric(difftime(t2,origen,units='days'))  
     Xnorm = cbind(t1,Xnorm)      # first column of Xnorm is time
   } else use_time = FALSE
-  if(missing(s))     use_space = FALSE
-  if(missing(Xcat))  use_cats = FALSE
-  else Xcat = apply(Xcat,2,as.integer)   # convert factors to integers
+  if(missing(spatial)) use_space = FALSE
+  if(missing(Xcat))    use_cats = FALSE
+  else Xcat = apply(Xcat,2,function(x) as.integer(factor(x)))   # convert factors to integers
   
-  
-  M <- min(maxcriminals,length(criminal))
-  g<-criminal
+  M <- min(maxcriminals,length(crimeID))
+  g<-crimeID
   maxg<-max(g,na.rm=T)
   miss<-is.na(g)
   g[miss]<-sample(1:M,sum(miss),replace=T)
@@ -136,8 +182,8 @@ crimeClust_bayes<-function(criminal,s,t1,t2,Xnorm,Xcat,
     pcat[,j]<-pcat[,j]/sum(pcat[,j])
   }
 
-  mus<-cbind(runif(M,min(s[,1],na.rm=T),max(s[,1],na.rm=T)),
-             runif(M,min(s[,2],na.rm=T),max(s[,2],na.rm=T)))
+  mus<-cbind(runif(M,min(spatial[,1],na.rm=T),max(spatial[,1],na.rm=T)),
+             runif(M,min(spatial[,2],na.rm=T),max(spatial[,2],na.rm=T)))
   mncat<-array(0,c(maxcat,q,M))
   for(l in 1:q){mncat[1:ncats[l],l,]<-1/ncats[l]}
   mu<-matrix(0,M,p)
@@ -146,7 +192,7 @@ crimeClust_bayes<-function(criminal,s,t1,t2,Xnorm,Xcat,
     mu[,p]<-mean(Xnorm[,l],na.rm=T)
     tau1[l]<-tau2[l]<-1/var(Xnorm[,l],na.rm=T)
   }
-  taus1<-taus2<-1/mean(var(s,na.rm=T))
+  taus1<-taus2<-1/mean(var(spatial,na.rm=T))
   theta<-colMeans(mu)
   thetas<-colMeans(mus)
   df<-rep(1,q)
@@ -158,7 +204,7 @@ crimeClust_bayes<-function(criminal,s,t1,t2,Xnorm,Xcat,
   keep.sd1<-keep.sd2<-keep.theta<-matrix(0,iters,p)
   keep.sds<-matrix(0,iters,2)
   missing<-(1:n)[miss]
-  missing_s<-(1:n)[is.na(s[,1])]
+  missing_s<-(1:n)[is.na(spatial[,1])]
   missing_t<-(1:n)[t1!=t2]
   n.missing_s<-length(missing_s)
   n.missing_t<-length(missing_t)
@@ -167,15 +213,15 @@ crimeClust_bayes<-function(criminal,s,t1,t2,Xnorm,Xcat,
 
   p.equal<-0
 
-  if(n.missing_s>0){s[missing_s,]<-0}
+  if(n.missing_s>0){spatial[missing_s,]<-0}
   for(i in 1:iters){
 
     ############   Missing Spatial locations   ##########
     sss<-1/sqrt(taus1)
     if(use_space & n.missing_s>0){
        j<-missing_s
-       s[j,1]<-rnorm(n.missing_s,mus[g[j],1],sss)
-       s[j,2]<-rnorm(n.missing_s,mus[g[j],2],sss)
+       spatial[j,1]<-rnorm(n.missing_s,mus[g[j],1],sss)
+       spatial[j,2]<-rnorm(n.missing_s,mus[g[j],2],sss)
     }
 
     ############   Censored times   ##########
@@ -209,7 +255,7 @@ crimeClust_bayes<-function(criminal,s,t1,t2,Xnorm,Xcat,
     for(j in missing){
        R<-log(probs)
        if(use_space){
-         R<-R-0.5*taus1*((s[j,1]-mus[,1])^2+(s[j,2]-mus[,2])^2)
+         R<-R-0.5*taus1*((spatial[j,1]-mus[,1])^2+(spatial[j,2]-mus[,2])^2)
        }
        if(use_time){
          R<-R-0.5*tau1[1]*(Xnorm[j,1]-mu[,1])^2
@@ -244,16 +290,16 @@ crimeClust_bayes<-function(criminal,s,t1,t2,Xnorm,Xcat,
     ############   Update spatial model   ##########
     if(use_space){
      VVV<-taus1*count.g(g,M)+taus2
-     MMM<-taus1*sum.by.g(s[,1],g,M)+taus2*thetas[1]
+     MMM<-taus1*sum.by.g(spatial[,1],g,M)+taus2*thetas[1]
      mus[,1]<-rnorm(M,MMM/VVV,1/sqrt(VVV))
-     MMM<-taus1*sum.by.g(s[,2],g,M)+taus2*thetas[2]
+     MMM<-taus1*sum.by.g(spatial[,2],g,M)+taus2*thetas[2]
      mus[,2]<-rnorm(M,MMM/VVV,1/sqrt(VVV))
 
      VVV<-taus2*M+.0001
      MMM<-taus2*colSums(mus)+c(-76.6,39.3)*.0001
      thetas<-rnorm(2,MMM/VVV,1/sqrt(VVV))
 
-     taus1<-rgamma(1,2*n/2+.1,sum((s-mus[g,])^2)/2+.1)
+     taus1<-rgamma(1,2*n/2+.1,sum((spatial-mus[g,])^2)/2+.1)
      SS<-sum((mus[,1]-thetas[1])^2+(mus[,2]-thetas[2])^2)
      taus2<-rgamma(1,2*M/2+.1,SS/2+.1)
     }
@@ -327,7 +373,7 @@ list(p.equal=p.equal,
    theta=keep.theta,
    s.miss=keep.s,
    t.censored=keep.t,
-   missing_s=missing_s,missing_t=missing_t,criminal=criminal)
+   missing_s=missing_s,missing_t=missing_t,crimeID=crimeID)
 }
 
 
@@ -389,51 +435,3 @@ bayesProb <- function(prob,drop=0){
 
 
 
-## Helper Functions
-##==============================================================================
-
-
-## taken from MCMCpack package
-rdirichlet <- function (n, alpha) {
-    l <- length(alpha)
-    x <- matrix(rgamma(l * n, alpha), ncol = l, byrow = TRUE)
-    sm <- x %*% rep(1, l)
-    return(x/as.vector(sm))
-}
-
-
-ddir<-function(y,df,p){
-   alpha<-df*p
-   lll<-lgamma(sum(alpha))+sum(alpha*log(y)) - sum(lgamma(alpha))
-lll}
-
-count<-function(j,y){sum(y==j)}
-
-get.counts<-function(y,M){
-       sapply(1:M,count,y=y)
-}
-sum.by.g<-function(y,g,M){
-   unig<-sort(unique(g))
-   sss<-rep(0,M)
-   sss[unig]<-tapply(y,g,sum)
-sss}
-
-count.g<-function(g,M){
-   unig<-sort(unique(g))
-   sss<-rep(0,M)
-   sss[unig]<-table(g)
-sss}
-
-
-#Draw samples from a truncated normal:
-rtruncnorm<-function(n,mu,sigma,lower,upper){
-   lp<-pnorm(lower,mu,sigma)
-   up<-pnorm(upper,mu,sigma)
-   y<-qnorm(runif(n,lp,up),mu,sigma)
-y}
-
-
-ddir2<-function(probs,D){
-  k<-length(probs)
-  lgamma(k*D)-k*lgamma(D)+(D-1)*sum(log(probs))
-}

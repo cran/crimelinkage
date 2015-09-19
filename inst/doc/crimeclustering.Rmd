@@ -1,7 +1,7 @@
 ---
 title: "Crime Series Identification and Clustering"
 author: "Michael D. Porter"
-date: "March 20, 2015"
+date: "`r Sys.Date()`"
 output: rmarkdown::html_vignette
 bibliography: refs.bib
 vignette: >
@@ -53,9 +53,12 @@ set.seed(1)         # set random seed for replication
 allPairs = makePairs(seriesData,thres=365,m=40)
 
 #-- Make Evidence Variables for Case Linkage
-varnames = list(spatial = c("X", "Y"),temporal = c("DT.FROM","DT.TO"),categorical = c("MO1",  "MO2", "MO3"))
-X = compareCrimes(allPairs,crimes,varnames,binary=TRUE,seed=2)  # Evidence data
-Y = ifelse(X$type=='linked',1,0)      # Linkage indicator. 1=linkage, 0=unlinked
+varlist = list( spatial = c("X", "Y"), 
+                temporal = c("DT.FROM","DT.TO"), 
+                categorical = c("MO1",  "MO2", "MO3"))    # crime variables list
+X = compareCrimes(allPairs,crimedata=crimes,varlist=varlist,binary=TRUE) # Evidence data
+Y = ifelse(allPairs$type=='linked',1,0)      # Linkage indicator. 1=linkage, 0=unlinked
+
 
 #-- Get Training Data
 set.seed(3)                                        # set random seed for replication
@@ -65,9 +68,11 @@ D.train = data.frame(X[train,],Y=Y[train])          # training data
 
 #-- Fit naive Bayes model and make estimateBF() function 
 vars = c("spatial","temporal","tod","dow","MO1","MO2","MO3") 
-NB = naiveBayes(vars,D.train,df=10,nbins=15,partition='quantile')
+fmla.all = as.formula(paste("Y ~ ", paste(vars, collapse= "+")))
+NB = naiveBayes(fmla.all,data=D.train,weights=weight,df=10,nbins=15,partition='quantile')
+
 estimateBF <- function(X){           # estimateBF() returns the estimated log Bayes factor
-  predictNB(NB,X)
+  predict(NB,newdata=X)
 }
 ```
 
@@ -90,23 +95,23 @@ In this example, we will cluster all of the unsolved crimes from `crimes` data a
 unsolved = subset(crimes, !crimeID %in% seriesData$crimeID)
 
 #-- Run agglomerative hierarchical crime clustering
-tree = crimeClust_hier(unsolved,varnames,estimateBF,linkage='average',seed=4)
+tree = crimeClust_hier(unsolved,varlist,estimateBF,linkage='average', binary=TRUE)
 
 #-- Plot results in dendrogram using plot_hcc()
-plot_hcc(tree,yticks=seq(-2,4,by=2),type="triangle",hang=.05,main="Average Linkage") 
+plot_hcc(tree,yticks=seq(-2,6,by=2),type="triangle",hang=.05,main="Average Linkage") 
 ```
-The dendrogram (using average linkage) only merges 5 crime pairs with a log Bayes factor of more than 4. 
+The dendrogram (using average linkage) merges `r sum(-tree$height + tree$offset>=4)` crime pairs with a log Bayes factor of more than 4. 
 
-Examining the crimes C:429 and C:469 (which were the most similar), we can see they are close in space, only a few days apart in time, and have matching values for MO1. 
+Examining the crimes C:431 and C:460 (which were the most similar), we can see they are close in space, around 2 weeks apart in time, and have matching values for MO1, MO2, and Mo3. 
 ```{r}
-#-- Examine crimes C:429 and C:469 
-subset(crimes,crimeID %in% c('C:429','C:469'))
+#-- Examine crimes C:431 and C:460 
+subset(crimes,crimeID %in% c('C:431','C:460'))
 ```
 
 
 If there is a particular crime of interest, then the function `clusterPath()` will find the sequence of merges and scores for the event.
 ```{r}
-#-- Find path info for crime C:425
+#-- Find path info for crime C:429
 cp = clusterPath('C:429',tree)
 cp[cp$logBF>0,]                 # only return path for scores > 0
 ```
@@ -126,48 +131,54 @@ unsolved = subset(crimes, !crimeID %in% seriesData$crimeID)
 
 The function `seriesID()` can be used to find the most similar crime series to the unsolved crime.
 ```{r}
-crime = unsolved[2,]             # use the 2nd unsolved crime
-results = seriesID(crime,solved,seriesData,varnames,estimateBF,seed=101)
+crime = unsolved[2,]             # use the 2nd unsolved crime C:392
+crime
+results = seriesID(crime,solved,seriesData,varlist,estimateBF)
 head(results$score)
 ```
 This shows that the unsolved crime is most similar to the crime(s) in crime group ```r results$score[1,1]``` with an average linkage log Bayes factor of ```r round(results$score[1,'average'],2)```. To get the crimes and offenders associated with these groups, just use the `subset()` function with the `groups` object:
 ```{r}
-subset(results$groups,group=='25')      # most similar crime series
-subset(results$groups,group=='93')      # 2nd most similar series
+subset(results$groups,group=='12')      # most similar crime series
+subset(results$groups,group=='154')     # 2nd most similar series
 subset(results$groups,group=='9')       # a series with multiple crimes
 ```
 
 We can do this for another unsolved crime
 ```{r}
 crime4 = unsolved[4,]             # use the 4th unsolved crime
-results4 = seriesID(crime4,solved,seriesData,varnames,estimateBF,seed=101)
+results4 = seriesID(crime4,solved,seriesData,varlist,estimateBF)
 head(results4$score)
 ```
-Because the scores are so low (log Bayes factors around `1`), this unsolved crime is not similar to any other solved crimes in the crime database. Perhaps this is the start of a new crime series?
+Because the scores are so low (log Bayes factors around `1`), this unsolved crime is not very similar to any other solved crimes in the crime database. Perhaps this is the start of a new crime series?
 
 It is also possible to compare a crime to all unsolved crimes to detect potential unsolved crime series.
 ```{r}
+#- using crime C:394 (the 4th unsolved crime)
 pairs = data.frame(i1=unsolved$crimeID[4],i2=unique(unsolved$crimeID[-4]))  
-X = compareCrimes(pairs,unsolved,varnames,show.pb=FALSE,seed=4)
+X = compareCrimes(pairs,unsolved,varlist,binary=TRUE)     # Evidence data
 score = data.frame(pairs,logBF=estimateBF(X))  
 head(score[order(-score$logBF),])
 ```
-There are no unsolved crimes that are very similar to this one - not enough evidence to link this crime to any others.
+There are no unsolved crimes that are very similar to this one - probably not enough evidence to link this crime to any others.
 
-This also gives similar results to the hierarchical clustering path approach:
+This approach also gives similar results to what was obtained from the hierarchical clustering path approach:
 ```{r}
-C429 = which(unsolved$crimeID %in% 'C:429')
+C429 = which(unsolved$crimeID %in% 'C:429')       # now use crime C:429
 pairs = data.frame(i1=unsolved$crimeID[C429],i2=unique(unsolved$crimeID[-C429]))  
-X = compareCrimes(pairs,unsolved,varnames,show.pb=FALSE,seed=1)
+X = compareCrimes(pairs,unsolved,varlist,binary=TRUE)     # Evidence data
 score = data.frame(pairs,logBF=estimateBF(X))  
-head(score[order(-score$logBF),])
+head(score[order(-score$logBF),])             
+
+#-- results from hierarchical clustering
+cp = clusterPath('C:429',tree)
+cp[cp$logBF>0,]   
 ```
 
 
 
 ## Bayesian Model-Based Approaches
 
-This section illustrates the partially-supervised Bayesian model-based clustering approach to crime series linkage of [@Reich-Porter-CrimeClust]. 
+This section illustrates the partially-supervised Bayesian model-based clustering approach to crime series linkage of [@CrimeClust]. 
 This approach is partially-supervised because the offender is known for a subset of the events, and utilizes spatiotemporal crime locations as well as crime features describing the offender\'s modus operandi.  
 
 The hierarchical model naturally handles complex features often seen in crime data, including missing data, interval censored event times, and a mix of discrete and continuous variables. It can also provide uncertainty assessments for all model parameters, including the relative influence of each feature (space, time, method of entry, etc.) in the model. In addition, the model produces posterior clustering probabilities which allow analysts to act on model output only as warranted.
@@ -181,7 +192,7 @@ A = merge(crimes,group_info,by="crimeID",all.x=TRUE) # add group info to crimes
 A = A[order(A$CG),]                                  # order by crime group
 
 #-- Run MCMC
-fit = crimeClust_bayes(A$CG, s=A[,c('X','Y')],t1=A$DT.FROM,t2=A$DT.TO,
+fit = crimeClust_bayes(A$CG, spatial=A[,c('X','Y')],t1=A$DT.FROM,t2=A$DT.TO,
                        Xcat=A[,c("MO1","MO2","MO3")],maxcriminals=1000,
                        iters=3000,burn=1000,update=100,seed=5)
 
@@ -197,7 +208,7 @@ The matrix `pp` contains the pairwise estimated probability that two crime are l
 save(A,fit,pp,file="vignettes/MCMC-results.RData")
 ```
 
-```{r,echo=FALSE}
+```{r,echo=FALSE,eval=TRUE}
 load("MCMC-results.RData")
 ```
 
@@ -215,26 +226,26 @@ fields::image.plot(1:n,ind.unsolved,pp[1:n,ind.unsolved],
            xlab="Crime",ylab="Unsolved Crime",
            main="Probability crimes are linked")
 ```
-We see that some unsolved crimes are linked to solved crimes with a posterior probability above `0.35`. This is a fairly strong linkage and may be worth further investigations.
+We see that some unsolved crimes are linked to solved crimes with a posterior probability above `0.25`. These crimes may be worth further investigations. 
 
 Here we plot the maximum posterior probability that an unsolved crime is linked to another crime (solved or unsolved).
 ```{r,fig.height=6,fig.width=8,out.width="70%"}
 #-- Find strongest linkages
 unsolved.probs = apply(pp[ind.unsolved,],1,max,na.rm=TRUE)  # maximum probability
 plot(ind.unsolved,unsolved.probs,xlab="unsolved crime",ylab='maximum probability of linkage')
-abline(h=0.30)
-ind = ind.unsolved[unsolved.probs > 0.30]
+abline(h=0.25)
+ind = ind.unsolved[unsolved.probs > 0.25]
 investigate = as.character(A$crimeID[ind])       # crimeIDs for crimes with strongest linkage
 investigate
 ```
-This shows that ```r investigate``` are the crimes with the strongest linkages (posterior probabilities greater that 0.30). These particular crimes can be investigated in more detail with the function `bayesProb()`:
+This shows that ```r investigate``` are the crimes with the strongest linkages (posterior probabilities greater that 0.25). A particular crime can be investigated in more detail with the function `bayesProb()`:
 ```{r}
 bp = bayesProb(pp[A$crimeID %in% "C:417"])
 bp$crimeID = A$crimeID[bp$index]
 bp$CG = A$CG[bp$index]
 head(bp)
 ```
-For this example, our model provides a list of the most likely crimes associated with the unsolved crime `C:417`. The first two crimes (C:15 and C:26) are solved crimes indicating that the offender(s) responsible for these crimes may also be responsible for C:417. The next crime, C:459 does not have a group ID. This means that it is an unsolved crime. 
+For this example, our model provides a list of the most likely crimes associated with the unsolved crime `C:417`. The first two crimes (C:15 and C:26) are solved crimes indicating that the offender(s) responsible for these crimes may also be responsible for C:417. The next two crimes, C:459 and C:446 do not have a group ID. This means that they are unsolved crimes. 
 By providing the posterior probabilities, crime analysts may choose to investigate further only if the linkage is strong enough.
 
 ## References

@@ -15,33 +15,58 @@
 #'   absolute value of numerical crime variables
 ##  Inputs:
 #'  @param Pairs (n x 2) matrix of crimeIDs
-#'  @param crimedata data.frame of crime incident data. \code{crimedata} must have
-#'    a column named: \code{crimeID}. Other column names must correspond to what 
-#'    is given in \code{varnames} list.
-#'  @param varnames list of column names corresponding to:
-#'  \itemize{
-#'    \item spatial - X,Y coordinates (in long,lat or X,Y)
-#'    \item temporal - DT.FROM, DT.TO
-#'    \item categorical - (optional) any categorical variables
-#'    \item numerical - (optional) any numeric variables
-#'  }
+#'  @param crimedata data.frame of crime incident data. There must be a column 
+#'   named \code{crimedata} that refers to the crimeIDs given in \code{Pairs}. 
+#'   Other column names must correspond to what is given in \code{varlist} list. 
+#'  @param varlist a list with elements named: crimeID, spatial, temporal,
+#'    categorical, and numerical. Each element should be a vector of the column 
+#'    names of \code{crimedata} corresponding to that feature:
+#'   \itemize{  
+#'    \item crimeID: crime ID for the crimedata that is matched to \code{Pairs}
+#'    \item spatial: X,Y coordinates (in long,lat or Cartesian) of crimes
+#'    \item temporal: DT.FROM, DT.TO of crimes. If times are uncensored, then 
+#'     only DT.FROM needs to be provided.
+#'    \item categorical: (optional) categorical crime variables
+#'    \item numerical: (optional) numerical crime variables
+#'   }
 #'  @param binary (logical) match/no match or all combinations for categorical
-#'    class
+#'    data
 #'  @param longlat (logical) are spatial coordinates in (long,lat)?
 #'  @param show.pb (logical) show the progress bar
-#'  @param seed seed for random number generation 
+#'  @param \ldots other arguments passed to hidden functions
 ##  Outputs:
 #'  @return data.frame of various proximity measures between the two crimes
+#'  \itemize{
+#'   \item If \code{spatial} data is provided: the euclidean distance 
+#'   (if \code{longlat = FALSE}) or Haversine great circle distance 
+#'   (\code{\link[geosphere]{distHaversine}} if \code{longlat = TRUE}) is 
+#'   returned (in kilometers).
+#'   
+#'   \item If \code{temporal} data is provided: the expected absolute time 
+#'    difference is returned: 
+#'    \itemize{
+#'      \item temporal - overall difference (in days)  [0,max]
+#'      \item tod - time of day difference (in hours)  [0,12]
+#'      \item dow - fractional day of week difference (in days) [0,3.5]
+#'    }
+#'    
+#'   \item If \code{categorical} data is provided: if \code{binary = TRUE} then a 
+#'    1 if the categories of each crime match and a 0 if they do not match. If 
+#'    \code{binary = FALSE}, then a factor of merged values (in form of f1:f2)
+#'    
+#'   \item If \code{numerical} data is provided: the absolute difference is 
+#'    returned.
+#'  }
 #'  @examples
 #'  data(crimes)
+#'  pairs = t(combn(crimes$crimeID[1:4],m=2))   # make some crime pairs
 #'  
-#'  varnames = list(
+#'  varlist = list(
 #'    spatial = c("X", "Y"),
 #'    temporal = c("DT.FROM","DT.TO"),
-#'    categorical = c("MO1",  "MO2", "MO3"))
-#'  pairs = t(combn(as.character(crimes$crimeID[1:4]),m=2))
-#'
-#'  compareCrimes(pairs,crimes,varnames,binary=TRUE)    
+#'    categorical = c("MO1",  "MO2", "MO3"))    # crime variables list
+#'      
+#'  compareCrimes(pairs,crimes,varlist,binary=TRUE)    
 #'  
 #'  @references
 #'  Porter, M. D. (2014). A Statistical Approach to Crime Linkage.
@@ -49,44 +74,61 @@
 #'  \url{http://arxiv.org/abs/1410.2285}
 #'  @export
 ##==============================================================================
-compareCrimes <- function(Pairs,crimedata,varnames,binary=TRUE,longlat=FALSE,
-                          show.pb=FALSE,seed=NULL){
-    if(!is.null(seed)) set.seed(seed)
-#  i1 = Pairs[,1]
-#  i2 = Pairs[,2] 
-  i1 = match(Pairs[,1],crimedata$crimeID)
-  i2 = match(Pairs[,2],crimedata$crimeID)
+compareCrimes <- function(Pairs,crimedata,varlist,binary=TRUE,longlat=FALSE,
+                          show.pb=FALSE,...){  
 
-  spatial=temporal=categorical=numerical=NA
-  if(!is.null(varnames$spatial)){
-    spatial = compareSpatial(crimedata[i1,varnames$spatial],
-                             crimedata[i2,varnames$spatial],
-                              longlat=longlat) }
+  if(class(crimedata) != 'data.frame') crimedata = as.data.frame(crimedata)
+  if(!all(unlist(varlist) %in% colnames(crimedata))) 
+    stop("There are names in varlist that don't match column names in crimedata")  
+  
+  valid.types = c("crimeID","spatial","temporal","categorical","numerical")
+  if( !all(names(varlist) %in% valid.types) ) 
+    warning(paste(setdiff(names(varlist),valid.types), '(from varlist)',
+                  'is not a valid type of crime data and will not be used to', 
+                  'make evidence variables.'))
+  
+  crimeID = as.character(crimedata$crimeID)
+  i1 = match(Pairs[,1],crimeID)
+  i2 = match(Pairs[,2],crimeID)
 
-  if(!is.null(varnames$temporal)){
-    temporal = compareTemporal(crimedata[i1,varnames$temporal],
-                               crimedata[i2,varnames$temporal],show.pb=show.pb) }
+  d.spat = d.temp = d.cat = d.num = NA
 
-  catNames = varnames$categorical
+  if(!is.null(varlist$spatial)){
+    spatial = crimedata[varlist$spatial]  
+    if(ncol(spatial) != 2) stop("spatial must be a data.frame of spatial coordinates 
+                                with two columns")
+    d.spat = compareSpatial(spatial[i1,1:2],spatial[i2,1:2],longlat=longlat)
+  }
+  
+  if(!is.null(varlist$temporal)){
+    temporal = crimedata[varlist$temporal]  
+    if(ncol(temporal) == 1) temporal = cbind(temporal,temporal) # no censoring
+    d.temp = compareTemporal(temporal[i1,1:2],temporal[i2,1:2],show.pb=show.pb,...)  
+  }
+
+  catNames = varlist$categorical
   if(!is.null(catNames)){
-    categorical = data.frame(matrix(nrow=length(i1),ncol=length(catNames),
+    d.cat = data.frame(matrix(nrow=length(i1),ncol=length(catNames),
                                     dimnames=list(NULL,catNames)))
     for(cat in catNames){
-      categorical[,cat] = compareCategorical(crimedata[i1,cat],crimedata[i2,cat],
+      d.cat[,cat] = compareCategorical(crimedata[i1,cat],crimedata[i2,cat],
                                              binary=binary)
-    } }
+    }  
+  }
 
-  numNames = varnames$numerical
+  numNames = varlist$numerical
   if(!is.null(numNames)){
-    numerical = data.frame(matrix(nrow=length(i1),ncol=length(numNames),
+    d.num = data.frame(matrix(nrow=length(i1),ncol=length(numNames),
                                   dimnames=list(NULL,numNames)))
     for(num in numNames){
-      numerical[,num] = compareNumeric(crimedata[i1,num],crimedata[i2,num])
-    } }
-  Dist = data.frame(spatial,temporal,categorical,numerical)
+      d.num[,num] = compareNumeric(crimedata[i1,num],crimedata[i2,num])
+    } 
+  }  
+
+  Dist = data.frame(spatial=d.spat,d.temp,d.cat,d.num)
   Dist[sapply(Dist,function(x) all(is.na(x)))] <- list(NULL)  
-  E = cbind(Pairs,Dist)  # combine crime pair info with evidence variables
-  rownames(E) <- NULL  # remove rownames
+  E = cbind(Pairs,Dist,stringsAsFactors=FALSE)  # combine crime pair info with evidence variables
+  rownames(E) <- NULL  # remove rownames  
 return(E)
 }
 
@@ -99,8 +141,8 @@ return(E)
 ##  Inputs:
 #'  @param DT1 (n x 2) data.frame of (DT.FROM,DT.TO) for the crimes
 #'  @param DT2 (n x 2) data.frame of (DT.FROM,DT.TO) for the crimes
-#'  @param niters number of iterations for Monte Carlo expectation
 #'  @param show.pb (logical) show the progress bar
+#'  @param \ldots other arguments passed to \code{\link{expAbsDiff.circ}}
 ##  Outputs:
 #'  @return data.frame of expected absolute differences:
 #'    \itemize{
@@ -108,72 +150,188 @@ return(E)
 #'      \item tod - time of day difference (in hours)  [0,12]
 #'      \item dow - fractional day of week difference (in days) [0,3.5]
 #'    }
-#'  @details Uses Monte Carlo expected value - aoristic like analysis
 #'  @keywords internal
 ##==============================================================================
-compareTemporal <- function(DT1,DT2,niters=2000,show.pb=TRUE){
-  #-- make a DateTime object for further processing
-  makeDTObj <- function(DT,origen){
-    A = data.frame(day=as.numeric(DT-origen,units='days'),
-                   tod=with(as.POSIXlt(DT), hour + min/60 + sec/3600),
-                   dow=match(weekdays(DT,abbreviate=TRUE),
-                             c('Sun','Mon','Tue','Wed','Thu','Fri','Sat')))
-    A$dow.f = A$dow+A$tod/24 - 1 # set between [0,7]
-    return(A)
-  }
+compareTemporal <- function(DT1,DT2,show.pb=FALSE,...){
+  #- interval length (in hours)  
+  L1 = as.numeric(abs(difftime(DT1[,2],DT1[,1],units='hours')))  
+  L2 = as.numeric(abs(difftime(DT2[,2],DT2[,1],units='hours')))  
+  #- time (seconds since origen)
+  day1 = as.numeric(julian(DT1[,1])) 
+  day2 = as.numeric(julian(DT2[,1]))  
+  #- time of day (at origen, not actual)
+  tod1 = (as.numeric(DT1[,1])/3600) %% 24
+  tod2 = (as.numeric(DT2[,1])/3600) %% 24
+  #- time of day (at origen, not actual)
+  dow1 = (as.numeric(DT1[,1])/(3600*24)) %% 7            
+  dow2 = (as.numeric(DT2[,1])/(3600*24)) %% 7            
 
-  #-- time of day difference
-  # tod - [0,24]
-  diff.tod <- function(tod1,tod2)  diff.circ(tod1,tod2,mod=24)
-
-  #-- day of week (fractional) difference
-  # dow - [0,7]
-  diff.dow <- function(dow1,dow2)  diff.circ(dow1,dow2,mod=7)
-
-  #-- difference between locations on a circle.
-  # mod is circle circumference
-  diff.circ <- function(a,b,mod){
-    # mod=7: day of week (fractional) difference, dow - [0,7]
-    # mod=24: time of day difference, tod - [0,24]
-    a = a %% mod       # ensure between [0,mod]
-    b = b %% mod       # ensure between [0,mod]
-    circ.diff = a - b
-    pmin(circ.diff %% mod ,-circ.diff %% mod)      # minimum difference
-  }
-
-  #-- Format DateTime Objects
-  origen = min(DT1$DT.FROM,DT2$DT.FROM)
-  A0 = makeDTObj(DT1$DT.FROM,origen)
-#  A0$interval.hr = DT1$TIMERANGE
-  A0$interval.hr = as.numeric(abs(difftime(DT1$DT.TO,DT1$DT.FROM,units='hours')))
-  B0 = makeDTObj(DT2$DT.FROM,origen)
-#  B0$interval.hr = DT2$TIMERANGE
-  B0$interval.hr = as.numeric(abs(difftime(DT2$DT.TO,DT2$DT.FROM,units='hours')))
-
-  #-- Monte Carlo Expected Absolute Differences
-  n = nrow(A0)
-  t.diff = A0$day - B0$day
-  X = matrix(0,n,3)
-  iters = 0L
-  if(show.pb) pb = txtProgressBar(style=3,max=niters)
-  while(iters < niters){
-    iters = iters + 1L
-    h.A = runif(n,min=0,max=A0$interval.hr) # random hours from DT.FROM
-    h.B = runif(n,min=0,max=B0$interval.hr)
-    temporal = abs(t.diff + (h.A-h.B)/24)   # Absolute Difference in Days
-#    temporal = t.diff + (h.A-h.B)/24        # Difference in Days
-    tod.A = (A0$tod + h.A)
-    tod.B = (B0$tod + h.B)
-    tod = diff.tod(tod.A %% 24,tod.B %% 24) # abs Difference in time of day
-    dow.A = (A0$dow.f +  tod.A / 24) %% 7
-    dow.B = (B0$dow.f +  tod.B / 24) %% 7
-    dow = diff.dow(dow.A,dow.B)             # abs Difference in (fractional) day of week
-    X = X + cbind(temporal,tod,dow)
-    if(show.pb) setTxtProgressBar(pb,iters)
-  }
-#  X = abs(X)
+  #- calculate temporal absolute differences
+  n = length(L1)
+  temporal = tod = dow = numeric(n)
+  if(show.pb) pb = txtProgressBar(style=3,max=n)  
+  for(i in 1:n){
+    temporal[i] = expAbsDiff(c(day1[i],day1[i]+L1[i]/24),c(day2[i],day2[i]+L2[i]/24))
+    tod[i] = expAbsDiff.circ(c(tod1[i],tod1[i]+L1[i]),c(tod2[i],tod2[i]+L2[i]),mod=24,...)
+    dow[i] = expAbsDiff.circ(c(dow1[i],dow1[i]+L1[i]/24),c(dow2[i],dow2[i]+L2[i]/24),mod=7,...)
+    if(show.pb) setTxtProgressBar(pb,i)
+  } 
   if(show.pb) close(pb)
-  return(data.frame(X/niters))  # Average of absolute differences
+return(data.frame(temporal,tod,dow) )             # expected absolute difference
+}
+
+
+
+##  expAbsDiff
+##==============================================================================
+#'  Expected absolute difference of two uniform RVs 
+#'
+#'  Calculates the expected absolute difference of two uniform rv's
+##  Inputs:
+#'  @param X c(min,max)
+#'  @param Y c(min,max)
+##  Outputs:
+#'  @return the expected absolute difference
+#'  @keywords internal
+##==============================================================================
+expAbsDiff <- function(X,Y){
+  if(X[2]<X[1]) stop("X[2] < X[1]")
+  if(Y[2]<Y[1]) stop("Y[2] < Y[1]")
+  if(X[1]<=Y[1]){  # set Sx to have minimum lower bound
+    Sx = X
+    Sy = Y
+  } else{
+    Sx = Y
+    Sy = X    
+  }
+  
+  # Scenario 1 (no overlap)
+  if(Sx[2] <= Sy[1]){ 
+    return(mean(Sy) - mean(Sx))
+  }
+
+  bks = sort(c(Sx,Sy))
+  sz = diff(bks)
+  mids = bks[-1] - sz/2   
+  
+  # Scenario 2 (partial overlap)
+  if(Sx[2] <= Sy[2]){ 
+    px = sz*c(1,1,0) / diff(Sx)
+    py = sz*c(0,1,1) / diff(Sy) 
+    return( 
+      (mids[2]-mids[1])*px[1]*py[2] +
+      (mids[3]-mids[1])*px[1]*py[3]+
+      (sz[2]/3)*px[2]*py[2] +
+      (mids[3]-mids[2])*px[2]*py[3] )
+  }
+  
+  # Scenario 3 (Y is subset X)
+  if(Sx[2] > Sy[2]){
+    px = sz*c(1,1,1) / diff(Sx)
+    #py = sz*c(0,1,0) / diff(Sy)   
+    return(
+      (mids[2]-mids[1])*px[1] + 
+      (sz[2]/3)*px[2] +
+      (mids[3]-mids[2])*px[3]  
+      )
+  }
+}  
+
+
+##  expAbsDiff.circ
+##==============================================================================
+#'  Expected absolute difference of two circular uniform RVs
+#'
+#'  Estimates the expected circular temporal distance between crimes using discrete 
+#'   FFT or numerical integration
+##  Inputs:
+#'  @param X c(min,min+length). X[1] must be >= 0 and X[2] >= X[1]. It is possible
+#'   that X[2] can be > mod. I.e., do not do \code{X \%\% mod}
+#'  @param Y c(min,min+length). Same conditions from X applies.
+#'  @param mod the period of time. E.g., mod=24 for time of day (in hours), 
+#'   mod=7 for day of week (in days)
+#'  @param n number of bins for discretization of continuous time domain.   
+#'  @param method use convolution or monte carlo integration (\code{montecarlo})
+##  Outputs:
+#'  @return the expected absolute difference
+#'  @keywords internal
+##  Note: There is 1440 min/day, so n = 2000 should give close to minute resolution 
+##==============================================================================
+expAbsDiff.circ <- function(X,Y,mod=24,n=2000,method="convolution"){
+  if(X[1]<0 | Y[1]<0) stop("X and Y must be >0")
+  if(diff(X)>=mod | diff(Y)>=mod) return(mod/4)  # uniform over mod
+  if(diff(X)==0) return(getD(X[1],Y,mod=mod))           
+  if(diff(Y)==0) return(getD(Y[1],X,mod=mod))    
+  if(method=="convolution"){
+    while((n %% 2) != 0) n = nextn(n+1)          # n must be even and nextn
+    theta = seq(0,mod,length=n+1)
+    delta = diff(theta[1:2])
+    x = diff(punif(theta,X[1],X[2])) + diff(punif(theta+mod,X[1],X[2]))
+    y = diff(punif(theta,Y[1],Y[2])) + diff(punif(theta+mod,Y[1],Y[2]))  
+    conv = convolve(x,y,conj=TRUE,type="circular")
+    tt = ifelse(theta<=mod/2,theta,mod-theta)[-(n+1)]
+    d = sum(tt*conv)
+  }
+  if(method=="numerical"){
+    if(diff(Y)<diff(X)){
+      tt = seq(Y[1],Y[2],length=n)
+      d = mean(getD(tt,X,mod=mod))
+    } else{
+      tt = seq(X[1],X[2],length=n)
+      d = mean(getD(tt,Y,mod=mod))    
+    }
+  }
+return(d)  
+}
+
+
+##  getD
+##==============================================================================
+#'  Expected absolute distance of a circular uniform RV to a point
+#'
+#'  Calculates the expected circular distance between a uniform rv and a point
+##  Inputs:
+#'  @param y vector of times in [0,mod)
+#'  @param X c(min,min+length). X[1] must be >= 0 and X[2] >= X[1]. It is possible
+#'   that X[2] can be > mod. I.e., do not do \code{X \%\% mod}
+#'  @param mod the period of time. E.g., mod=24 for time of day (in hours), 
+#'   mod=7 for day of week (in days)
+##  Outputs:
+#'  @return the expected absolute difference
+#'  @keywords internal
+##==============================================================================
+getD <- function(y,X,mod=24){
+  if(X[1] > mod | X[1] < 0) stop("Minimum X[1] not within limits [0,mod)")
+  if(X[2] < X[1]) stop("X[2] must be >= X[1]")
+  y = (y - X[1]) %% mod  
+  B = X[2] - X[1]        # length of interval 
+  if(B == 0) return(mod/2-abs(mod/2-abs(y)))  # For |X| = 0
+  if(B >= mod) return(rep(mod/4,length(y)))   # For long intervals
+  D = numeric(length(y))  
+  if(diff(X)>=mod/2){    
+    K = mod - B/2 - (mod/2)^2/B
+    u = y-mod/2
+    i1 = (y <= B-mod/2)
+    D[i1] = y[i1]*(1-mod/B) + K
+    i2 = (y > B-mod/2 & y <= mod/2)
+    D[i2] = (y[i2]-B/2)^2/B  +B/4   # mod/2 - (u^2+(B-u)^2)/(2*B)
+    i3 = (y > mod/2 & y <= B)
+    D[i3] =  (B-y[i3])*(1-mod/B) + K
+    i4 = (y > B)
+    D[i4] = mod/2 - B/4 - ((u[i4]-B/2))^2/B
+  }
+  else{            
+    u = y-B/2
+    i1 = (y<B)
+    D[i1] = u[i1]^2/B + B/4
+    i2 = (y>=B & y<=mod/2)
+    D[i2] = u[i2]
+    i3 = (y>mod/2 & y<=B+mod/2)
+    D[i3] = mod/2 - ((y[i3]-mod/2)^2 + (B-y[i3]+mod/2)^2) /(2*B)  
+    i4 = (y > B+mod/2)  
+    D[i4] = mod - u[i4]
+  }
+  return(D)  
 }
 
 

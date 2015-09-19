@@ -1,0 +1,22 @@
+
+# crimelinkage 0.0.4 (09/18/2015)
+
+* Switched to the formula interface for naiveBayes() to be more consistent with other R functions. 
+  - There is also a naiveBayes.fit() function to pass in data w/o formula.
+  - Note: this is different than the function from previous version. Old calls 
+    will no longer work. Please update to the new interface.
+* Added S3 methods: plot.naiveBayes, predict.naiveBayes
+* Improved compareCrimes() function.  
+  - Better estimation of the expected absolute differences between the temporal 
+    crime variables using convolution. It is now a deterministic function. 
+  - Uncensored event times, if exact times are known, are now permitted.
+* Updated crimes dataset with a slight modification to some dates.
+* Updated predict.naiveBayes() to give warning when a predictor is not included 
+    in model, but continue to give results.
+* Corrected typos in vignettes
+* Added default packges to imports
+
+
+# crimelinkage 0.0.3 (04/18/2015)
+
+* Initial package submission

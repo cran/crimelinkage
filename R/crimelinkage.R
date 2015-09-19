@@ -21,6 +21,7 @@
 #' @docType package
 #' @name crimelinkage-package
 #' @aliases crimelinkage
+#' @import graphics stats utils
 NULL
 
 

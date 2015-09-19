@@ -7,12 +7,17 @@
 #'  most closely related (as measured by Bayes Factor) to an unsolved crime.
 ##  Inputs:
 #'  @param crime crime incident; vector of crime variables
-#'  @param solved incident data for the solved crimes
-#'  @param seriesData table of crimeIDs and crimeseries (results from \code{\link{makeSeriesData}})
+#'  @param solved incident data for the solved crimes. Must have a column named 
+#'   \code{crimeID}.
+#'  @param seriesData table of crimeIDs and crimeseries (results from 
+#'  \code{\link{makeSeriesData}})
 ##  Case Linkage Objects:
-#'  @param varnames the variable names necessary for getting evidence variables
+#'  @param varlist a list of the variable names (columns of \code{solved} and 
+#'   \code{crime}) 
+#'   used to create evidence variables with \code{\link{compareCrimes}}.   
 #'  @param estimateBF function to estimate the bayes factor from evidence variables
-#'  @param linkage.method the type of linkage for comparing one crime to a set of crimes
+#'  @param linkage.method the type of linkage for comparing one crime to a set 
+#'   of crimes
 #'    \itemize{
 #'      \item \dQuote{average} uses the average bayes factor
 #'      \item \dQuote{single} uses the largest bayes factor (most similar)
@@ -34,18 +39,18 @@
 #'  \url{http://arxiv.org/abs/1410.2285}
 #'  @export
 ##==============================================================================
-seriesID <- function(crime,solved,seriesData,varnames,estimateBF,
+seriesID <- function(crime,solved,seriesData,varlist,estimateBF,
                      linkage.method = c('average','single','complete'),
                      group.method = 3,...){
 
   #- make crime data
-  vars = c('crimeID',unlist(varnames))
+  vars = unique(c('crimeID',unlist(varlist)))
   if(is.null(crime$crimeID)) crime$crimeID = 'new.crime'
-  crimedata = rbind(crime[,vars],solved[,vars,drop=FALSE])  # add new.crime to solved
+  crimedata = rbind(crime[,vars],solved[,vars])  # add new.crime to solved
 
   #- compare crime pairs, get evidence vars
   pairs = data.frame(i1=crime$crimeID,i2=unique(solved$crimeID),stringsAsFactors=FALSE) 
-  X = compareCrimes(pairs,crimedata,varnames,...)
+  X = compareCrimes(pairs,crimedata,varlist,...)  
 
   #- Estimate the Bayes Factor
   bf = estimateBF(X)  
@@ -78,7 +83,7 @@ return(list(score=Y,groups=data.frame(seriesData,group=CG)))
 ##  Outputs:
 #'  @details If methods is a vector of linkages to use, then the all linkages are 
 #'    calcualted and ordered according to the first element.
-#'  @return If \code{details = FALSE}: a data.frame of the Bayes Factor scores
+#'  @return a data.frame of the Bayes Factor scores
 #'    ordered (highest to lowest). 
 #'  @examples
 #'  # See vignette: "Crime Series Identification and Clustering" for usage.    
@@ -113,7 +118,7 @@ return(Y)
 # #'  @param solved crime incident data of solved crimes
 # #'  @param seriesData table of crimeIDs and crimeseries (results from makeSeriesData)
 # ##  Case Linkage Objects:
-# #'  @param varnames the variable names necessary for getting evidence variables
+# #'  @param varlist the variable names necessary for getting evidence variables
 # #'  @param binary (logical) match/no match or all combinations for categorical class
 # #'  @param estimateBF function to estimate the bayes factor from evidence variables
 # #'  @param linkage the type of linkage for compare a crime to a set of crimes
@@ -128,14 +133,14 @@ return(Y)
 # #'    \code{details = FALSE}
 # ##  @export
 # ##==============================================================================
-# seriesID.batch <- function(unsolved,solved,seriesData,varnames,estimateBF,
+# seriesID.batch <- function(unsolved,solved,seriesData,varlist,estimateBF,
 #                             linkage=c('average','single','complete'),
 #                             binary=TRUE,show.pb=TRUE){
 #   n = nrow(unsolved)
 #   score = vector('list',n); names(score) = paste0('crime',1:n)
 #   if(show.pb) pb = txtProgressBar(style=3,max=n)
 #   for(i in 1:n){
-#     score[[i]] = seriesID(unsolved[i,],solved,seriesData,varnames,estimateBF,
+#     score[[i]] = seriesID(unsolved[i,],solved,seriesData,varlist,estimateBF,
 #                           linkage=linkage,details=FALSE)
 #     if(show.pb) setTxtProgressBar(pb,i)
 #   }

@@ -1,6 +1,5 @@
 citHeader( "To cite crimelinkage in publications use:" )
 
-
 citEntry(
       entry     = "Article",
       title     = "A Statistical Approach to Crime Linkage",
@@ -16,7 +15,6 @@ citEntry(
             "arXiv preprint arXiv:1410.2285.")
    )
 
-
 citEntry(
       entry     = "Article",
       title     = "Partially supervised spatiotemporal clustering for burglary crime series identification",
@@ -31,9 +29,6 @@ citEntry(
                     "Partially supervised spatiotemporal clustering for burglary crime series identification.", "Journal of the Royal Statistical Society: Series A (Statistics in Society),",
                     "178(2), 465-480.")
    )
-
-
-
 
 citEntry(
       entry     = "TechReport",
@@ -53,4 +48,3 @@ citEntry(
    )
 
 citFooter("We gratefully acknowledge the support of the National Institute of Justice: 2010-DE-BX-K255.")
-

@@ -7,9 +7,12 @@
 #' Run hierarchical clustering on a set of crimes using the log Bayes Factor as 
 #' the similarity metric.
 ##  Inputs:
-#'  @param crimes data.frame of crime incidents
-#'  @param varnames the variable names necessary for getting evidence variables
-#'  @param estimateBF function to estimate the bayes factor from evidence variables
+#'  @param crimedata data.frame of crime incidents. Must contain a column named
+#'   \code{crimeID}.
+#'  @param varlist a list of the variable names (columns of \code{crimedata}) 
+#'   used to create evidence variables with \code{\link{compareCrimes}}. 
+#'  @param estimateBF function to estimate the log bayes factor from evidence 
+#'   variables
 #'  @param linkage the type of linkage for hierarchical clustering
 #'    \itemize{
 #'      \item \dQuote{average} uses the average bayes factor
@@ -22,11 +25,25 @@
 #'    Next, it passes this information into \code{\link{hclust}} to carry out the 
 #'    agglomerative hierarchical clustering. Because \code{\link{hclust}} requires 
 #'    a dissimilarity, this uses the negative log Bayes factor. 
+#'    
+#'    The input \code{varlist} is a list with elements named: crimeID, spatial, 
+#'    temporal, categorical, and numerical. Each element should be a vector of 
+#'    the column names of \code{crimedata} corresponding to that feature. See 
+#'    \code{\link{compareCrimes}} for more details. 
 ##  Outputs:
 #'  @return An object of class \code{hclust} (from \code{\link{hclust}}). 
 #'  @seealso \code{\link{clusterPath}, \link{plot_hcc}}
 #'  @examples
-#'  # See vignette: "Crime Series Identification and Clustering" for usage.
+#'  data(crimes)
+#'  #- cluster the first 10 crime incidents
+#'  crimedata = crimes[1:10,]
+#'  varlist = list(spatial = c("X", "Y"), temporal = c("DT.FROM","DT.TO"), 
+#'      categorical = c("MO1",  "MO2", "MO3"))
+#'  estimateBF <- function(X) rnorm(NROW(X))   # random estimation of log Bayes Factor
+#'  HC = crimeClust_hier(crimedata,varlist,estimateBF)
+#'  plot_hcc(HC,yticks=-2:2)
+#'  
+#'  # See vignette: "Crime Series Identification and Clustering" for more examples.
 #'  @references
 #'  Porter, M. D. (2014). A Statistical Approach to Crime Linkage.
 #'    \emph{arXiv preprint arXiv:1410.2285.}.
@@ -34,12 +51,12 @@
 #'  @export
 ##  #ToDO: add crime.labels = ifknown, crimegroups  
 ##==============================================================================
-crimeClust_hier <- function(crimes,varnames,estimateBF, 
+crimeClust_hier <- function(crimedata,varlist,estimateBF, 
                         linkage = c('average','single','complete'),...){
   linkage = match.arg(linkage)
-  crimeIDs = unique(as.character(crimes$crimeID))
+  crimeIDs = unique(as.character(crimedata$crimeID))  
   allPairs = t(combn(crimeIDs,2))
-  A = compareCrimes(allPairs,crimes,varnames,...)
+  A = compareCrimes(allPairs,crimedata,varlist,...)
   bf = estimateBF(A)  
   #-- Perform aglomerative hierarchcical clustering
   d2 = as.numeric(-bf); class(d2) = 'dist'
@@ -87,7 +104,7 @@ plot_hcc <- function(tree,yticks=seq(-2,8,by=2),hang=-1,...){
   plot(hcd,yaxt="n",...) 
   offset = tree$offset
   labs = -yticks
-  abline(h=labs+offset,col="grey80")
+  abline(h=labs+offset,col="grey80",lty=3)
   axis(2,at=labs+offset,labels=-labs,cex=.6,las=1)
   nClusters = sapply(labs+offset,function (h) length(unique(cutree(tree,h=h))))
   axis(4,at=labs+offset,labels=nClusters,las=1)

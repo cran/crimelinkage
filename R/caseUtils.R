@@ -29,6 +29,7 @@
 #'  @return Vector of offenderIDs responsible for crimes labeled \code{crimeID}.
 #'  @seealso \code{\link{getCrimeSeries}}
 #'  @examples
+#'  
 #'  data(offenders)
 #'  
 #'  getCriminals("C:1",offenders)
@@ -59,8 +60,9 @@ getCriminals <- function(crimeID,offenderTable){
 ##  Outputs:
 #'  @return List of offenders with their associated crime series.
 #'  @seealso \code{\link{makeSeriesData}}, \code{\link{getCriminals}}, 
-#'    \code{\link{makeSeriesData}}
+#'    \code{\link{getCrimes}}
 #'  @examples 
+#'  
 #'  data(offenders)
 #'  
 #'  getCrimeSeries("O:40",offenders)
@@ -103,7 +105,7 @@ getCrimeSeries <- function(offenderID,offenderTable,restrict=NULL,show.pb=FALSE)
 #'  @param crimedata data.frame of crime incident data. \code{crimedata} must be
 #'    a data.frame with a column named: \code{crimeID} 
 ##  Outputs:
-#'  @return The subset of crimes in \code{crimedata} that are attributiable to 
+#'  @return The subset of crimes in \code{crimedata} that are attributable to 
 #'    the offender named \code{offenderID}
 #'  @seealso \code{\link{getCrimeSeries}}
 #'  @examples
@@ -125,24 +127,28 @@ getCrimes <- function(offenderID,crimedata,offenderTable){
 ##==============================================================================
 #'  Make crime series data
 #'
-#'  Creates new data.frame with index to crimedata and offender information
+#'  Creates a data frame with index to crimedata and offender information. It is 
+#'  used to generate the linkage data. 
 ##  Inputs:
 #'  @param crimedata data.frame of crime incident data. \code{crimedata} must have
-#'    columns named: \code{crimeID}, \code{DT.FROM}, and \code{DT.TO}
+#'    columns named: \code{crimeID}, \code{DT.FROM}, and \code{DT.TO}. Note: if
+#'    crime timing is known exactly (uncensored) than only \code{DT.FROM} is 
+#'    required.
 #'  @param offenderTable offender table that indicates the offender(s) responsible 
 #'    for solved crimes. \code{offenderTable} must have columns named: 
 #'    \code{offenderID} and \code{crimeID}.
 #'  @param time the event time to be returned: 'midpoint', 'earliest', or
 #'    'latest'  
 ##  Outputs:
-#'  @return data.frame representation of the crime series present in the 
+#'  @return data frame representation of the crime series present in the 
 #'    \code{crimedata}. It includes the crime ID (\code{crimeID}), index of that
 #'    crimeID in the original \code{crimedata} (\code{Index}), the crime series 
-#'    ID (\code{CS}), and the event time (\code{TIME}).
+#'    ID (\code{CS}) corresponding to each \code{offenderID}, and the event time 
+#'    (\code{TIME}).
 #'  @details The creates a crimeseries data object that is required for creating
-#'    linkage data. It creates a crime series ID numbers (\code{CS}) for every 
-#'    offender. Because of co-offending, a single crime (\code{crimeID}) can be 
-#'    in multiple crime series. 
+#'    linkage data. It creates a crime series ID (\code{CS}) for every 
+#'    offender. Because of co-offending, a single crime (\code{crimeID}) can 
+#'    belong to multiple crime series. 
 #'  @seealso \code{\link{getCrimeSeries}}
 #'  @examples  
 #'  data(crimes)
@@ -159,6 +165,13 @@ getCrimes <- function(offenderID,crimedata,offenderTable){
 #'  table(nCO)                      # distribution of number of co-offenders
 #'  mean(nCO>1)                     # proportion of crimes with multiple co-offenders
 #'  @export
+#
+##  Note: could use dplyr
+##  require(dplyr)
+##  seriesData = distinct(offenderTable) %>% 
+##               inner_join(crimedata,by="crimeID") %>%
+##               mutate(TIME=DT.FROM + (DT.TO-DT.FROM)/2) %>% 
+##               select(crimeID,offenderID,TIME)
 ##==============================================================================
 makeSeriesData <- function(crimedata,offenderTable,time=c("midpoint","earliest","latest")){
   cid = unique(crimedata$crimeID)
@@ -170,6 +183,7 @@ makeSeriesData <- function(crimedata,offenderTable,time=c("midpoint","earliest",
   a = unlist(sapply(CS,'[','crimeID'))  # All crimes by offenders in oid crimeseries'
   b = match(a,crimedata$crimeID)      # index to Crimes
   time = match.arg(time)
+  if(is.null(crimedata$DT.TO)) crimedata$DT.TO = crimedata$DT.FROM  # for uncensored data
   TIME = switch(time,
                  midpoint = with(crimedata[b,],DT.FROM + (DT.TO-DT.FROM)/2),
                  earliest = with(crimedata[b,],DT.FROM),
@@ -180,13 +194,7 @@ makeSeriesData <- function(crimedata,offenderTable,time=c("midpoint","earliest",
                           offenderID=rep(oid,times=nCrimes),
                           TIME,
                           stringsAsFactors=FALSE)
-  # class(seriesData) = "crimeseries"
-  return(seriesData)
-#  require(dplyr)
-#  seriesData = distinct(offenderTable) %>% 
-#               inner_join(crimedata,by="crimeID") %>%
-#               mutate(TIME=DT.FROM + (DT.TO-DT.FROM)/2) %>% 
-#               select(crimeID,offenderID,TIME)
+return(seriesData)
 }
 
 
@@ -205,20 +213,22 @@ makeSeriesData <- function(crimedata,offenderTable,time=c("midpoint","earliest",
 #'  @param X crime series data (generated from \code{\link{makeSeriesData}}) 
 #'    with offender ID (\code{offenderID}),
 #'    crime ID (\code{crimeID}), and the event datetime (\code{TIME})
-#'  @param method Method==1 (default) forms groups by finding
-#'    the maximal connected offender subgraph. Method==2 forms groups from the 
-#'    unique group of co-offenders. Method==3 forms from groups from offenderIDs
+#'  @param method Method=1 (default) forms groups by finding
+#'    the maximal connected offender subgraph. Method=2 forms groups from the 
+#'    unique group of co-offenders. Method=3 forms from groups from offenderIDs
 ##  Outputs:
 #'  @return vector of crime group labels 
 ##  Notes:
-#'  @details Method==1 forms groups by finding the maximal connected offender 
+#'  @details Method=1 forms groups by finding the maximal connected offender 
 #'    subgraph. So if two offenders have ever co-offended, then all of their crimes
-#'    are assigned to the same group. Method==2 forms groups from the unique group 
-#'    of co-offenders. So for two offenders who co-offended. All the co-offending 
-#'    crimes are in one group and any crimes committed individually are assigned 
-#'    to another group. Method==3 forms groups from the offender(s) responsible. 
-#'    So a crime committed by multiple people is assinged to multiple groups.
-#'  @examples  
+#'    are assigned to the same group. Method=2 forms groups from the unique group 
+#'    of co-offenders. So for two offenders who co-offended, all the co-offending 
+#'    crimes are in one group and any crimes committed individually or with other 
+#'    offenders are assigned to another group. Method=3 forms groups from the 
+#'    offender(s) responsible. So a crime that is committed by multiple people 
+#'    will be assigned to multiple groups.
+#'  @examples 
+#'   
 #'  data(crimes)
 #'  data(offenders)
 #'  seriesData = makeSeriesData(crimedata=crimes,offenderTable=offenders)
@@ -305,6 +315,7 @@ return(CG)
 #'  @param thres the threshold (in days) of allowable time distance
 #'  @param m the number of samples from each crime group (for unlinked pairs)
 #'  @param show.pb (logical) should a progress bar be displayed
+#'  @param seed seed for random number generation
 ##  Outputs:
 #'  @return matrix of indices of crime pairs with weights. For \code{makePairs},
 #'   The last column \code{type} indicates if the crime pair is linked or unlinked.
@@ -312,18 +323,25 @@ return(CG)
 #'  @details 
 #'   \code{makePairs} is a Convenience function that calls \code{makeLinked} and
 #'   \code{makeUnlinked} and combines the results. It is unlikely that the latter
-#'   two functions will need to be called directly
+#'   two functions will need to be called directly.
 #'   
 ##  makeLinked:  
-#'   For \emph{linked} crime pairs, the weights are such that each crime
-#'   series only gives a total weight of 1. Due to co-offending, the sum of weights 
+#'   For \emph{linked} crime pairs, the weights are such that each crime series
+#'   contributes a total weight of no greater than 1. Specifically, the weights 
+#'   are  \eqn{W_{ij} = \min \{1/N_m: V_i,V_j \in C_m \}}, 
+#'   where \eqn{C_m} is the crime series for offender \eqn{m} and \eqn{N_m} is 
+#'   the number of crime pairs in their series (assuming \eqn{V_i} and \eqn{V_j} 
+#'   are together in at least one crime series).
+##   such that each crime
+##   series contributes a total weight of 1. 
+#'   Due to co-offending, the sum of weights 
 #'   will be smaller than the number of series with at least two crimes.
 #'   
 ##  makeUnlinked:
-#'   To form the \emph{unlinked} crime pairs, \emph{crime groups} are identifyed 
+#'   To form the \emph{unlinked} crime pairs, \emph{crime groups} are identified 
 #'   as the maximal connected offender subgraphs. Then \code{m} indices are drawn
-#'   from each crime group and paired with crimes from other crime groups according 
-#'   to weights to ensure that large groups don't give the most events.
+#'   from each crime group (with replacment) and paired with crimes from other crime groups according 
+#'   to weights that ensure that large groups don't give the most events.
 #'  @examples  
 #'  data(crimes)
 #'  data(offenders)
@@ -344,9 +362,9 @@ NULL
 ##  igraph package is needed for makeUnlinked()
 #' @rdname makePairs
 ##==============================================================================
-makePairs <- function(X,thres=365,m=40,show.pb=FALSE){
+makePairs <- function(X,thres=365,m=40,show.pb=FALSE,seed=NULL){
   linkedPairs = makeLinked(X,thres=thres)          # Get all linked pairs (with weights)
-  unlinkedPairs = makeUnlinked(X,m=40,thres=thres,show.pb=show.pb) # Sample unlinked pairs
+  unlinkedPairs = makeUnlinked(X,m=40,thres=thres,show.pb=show.pb,seed=seed) # Sample unlinked pairs
   linkedPairs$type = 'linked'
   unlinkedPairs$type = 'unlinked'
   allPairs = rbind(linkedPairs,unlinkedPairs)
@@ -406,15 +424,14 @@ makeLinked <- function(X,thres=365){
 ## changed indexing from Index to crimeID columns
 #' @rdname makePairs
 ##==============================================================================
-makeUnlinked <- function(X,m,thres=365,show.pb=FALSE){
+makeUnlinked <- function(X,m,thres=365,show.pb=FALSE,seed=NULL){
+  if(!is.null(seed)) set.seed(seed)
   #require(igraph) for makeGroups() function
   X$CG = makeGroups(X,method=1)   # get crime groups
   nCG = length(unique(X$CG))      # number of crime groups
   
   Y = tapply(1:nrow(X),X$CG, function(i){
-#    i = i[!duplicated(X$Index[i])] # remove rows with duplicated Index
-     i = i[!duplicated(X$crimeID[i])] # remove rows with duplicated Index
-#    data.frame(X[i,c('Index','CG','TIME'),drop=FALSE],
+     i = i[!duplicated(X$crimeID[i])] # remove rows with duplicated crimeID
      data.frame(X[i,c('crimeID','CG','TIME'),drop=FALSE],
                wt= 1/((nCG-1)*(length(i))))
   })
@@ -429,7 +446,6 @@ makeUnlinked <- function(X,m,thres=365,show.pb=FALSE){
     i1 = getSample(ind,m,replace=TRUE) # compare m crimes from group i
     i2 = sample(I[-ind],m,prob=Y$wt[-ind]) # sample indices from other groups
     val = dtdiff(Y$TIME[i1],Y$TIME[i2],units='days')
-#    el = data.frame(i1=Y$Index[i1],i2=Y$Index[i2],val)
     el = data.frame(i1=Y$crimeID[i1],i2=Y$crimeID[i2],val,stringsAsFactors=FALSE)
     EL = rbind(EL,el)
     if(show.pb) setTxtProgressBar(pb,i)
@@ -441,6 +457,7 @@ makeUnlinked <- function(X,m,thres=365,show.pb=FALSE){
   EL[flip,1:2] = EL[flip,2:1]
   EL = unique(EL[,1:2])   # unlinked pairs
   EL2 = cbind(EL,weight=1)
+  attr(EL2,"num.groups") = nCG   # number of crime groups
 return(EL2)
 }
 
@@ -463,114 +480,6 @@ return(EL2)
 dtdiff <- function(t1,t2,units='days'){
   as.numeric(abs(difftime(t1,t2,units=units)))
 }
-
-
-
-##  getDateTime
-##==============================================================================
-#'  Creates date-time objects for censored crime data
-#'
-#'  Takes censored crime data with separate date and time fields, attempts to 
-#'   repair bad or missing entries, and creates date-time objects.
-##  Inputs:
-#'  @param DATE_FROM vector of earliest start dates for crimes
-#'  @param TIME_FROM vector of earliest start times for crimes
-#'  @param DATE_TO vector of latest end dates for crimes
-#'  @param TIME_TO vector of latest end times for crimes     
-#'  @param tz timezone
-#'  @details
-#'  \itemize{
-#'              \item times must be in format: \code{\%H\%M}
-#'              \item dates must be in format: \code{\%Y-\%m-\%d}
-#'              }
-##  Outputs:
-#'  @return data frame with date-time (\code{POSIXlt}) fields: DT.FROM, DT.TO 
-#'   corresponding to the time range of (possibly) censored crime events
-#'  @seealso \code{\link{fixDateTime}}   
-#'  @examples
-#'  getDateTime("2014-03-20","1530","2014-03-22","0310") 
-#'  @export
-##==============================================================================
-getDateTime <- function(DATE_FROM,TIME_FROM,DATE_TO,TIME_TO,tz=""){
-  #- Replace missing DATE if possible
-  DATE_FROM = as.Date(DATE_FROM)
-  DATE_TO = as.Date(DATE_TO)
-  ind1 = is.na(DATE_FROM)
-  ind2 = is.na(DATE_TO)
-  DATE_FROM[ind1] = DATE_TO[ind1]
-  DATE_TO[ind2] = DATE_FROM[ind2]
-
-  #- Replace NAs in TIME
-  TIME_FROM = as.character(TIME_FROM)
-  TIME_TO = as.character(TIME_TO)
-  TIME_FROM[is.na(TIME_FROM)] = '0000'
-  TIME_TO[is.na(TIME_TO)] = '2400'
-
-  #-- Fix non-TIME values, but allow '2400' since will correct separately
-  a = strptime(TIME_FROM,"%H%M") # Time not in correct format
-  ind = which(is.na(a) & TIME_FROM != '2400')
-  TIME_FROM[ind] = '0000'
-  a = strptime(TIME_TO,"%H%M") # Time not in correct format
-  ind = which(is.na(a) & TIME_TO != '2400')
-  TIME_TO[ind] = '2400'
-
-  #- Fix TIME==2400 by making it 0000 of the next day
-  ind = which(TIME_TO == '2400')
-  DATE_TO[ind] = DATE_TO[ind] + 1
-  TIME_TO[ind] = '0000'
-  ind = which(TIME_FROM == '2400')
-  DATE_FROM[ind] = DATE_FROM[ind] + 1
-  TIME_FROM[ind] = '0000'
-
-  #- Get DateTime objects
-  DT1 = strptime(paste(DATE_FROM,TIME_FROM),"%Y-%m-%d %H%M",tz=tz)
-  DT2 = strptime(paste(DATE_TO,TIME_TO),"%Y-%m-%d %H%M",tz=tz)
-
-  #- Correct for switched from-to fields
-  DT.FROM = pmin(DT1,DT2)
-  DT.TO = pmax(DT1,DT2)
-
-  #- Get length of censored time range  
-#  TIMERANGE = as.numeric(difftime(DT.TO,DT.FROM,units='hours'))
-
-  #- Return dataframe
-  DT.data = data.frame(DT.FROM, DT.TO) 
-  return(DT.data)
-}
-  
-
-##  fixDateTime
-##==============================================================================
-#'  Updates criminal incident data with date-time objects in correct format.
-#'
-#'  Convenience function to update crime data that has separate date and time 
-#'   fields with date-time fields
-##  Inputs:
-#'  @param crimedata (n x p) data frame of crimes containing the fields:
-#'    DATE_FROM, DATE_TO, TIME_FROM, TIME_TO
-#'  \itemize{
-#'              \item times must be in format: \code{\%H\%M}
-#'              \item dates must be in format: \code{\%Y-\%m-\%d}
-#'              }
-#'  @param tz timezone
-#'  @details See \code{\link{getDateTime}} for details.
-##  Outputs:
-#'  @return This function returns an updated \code{crimedata} data frame by adding
-#'    the fields: DT.FROM, DT.TO and deleting the fields:
-#'    DATE_FROM, DATE_TO, TIME_FROM, TIME_TO.
-#'  @seealso \code{\link{getDateTime}}
-#'  @export
-##==============================================================================
-fixDateTime <- function(crimedata,tz=""){
-  if( ! all( c('DATE_FROM','DATE_TO','TIME_FROM','TIME_TO') %in% colnames(crimedata) ))
-   stop('crimedata must contain the column names: DATE_FROM, DATE_TO, TIME_FROM, TIME_TO')
-  DT = with(crimedata, 
-            getDateTime(DATE_FROM,TIME_FROM,DATE_TO,TIME_TO,tz=tz))
-  remove.cols =  which(colnames(crimedata) %in% 
-                         c('DATE_FROM','TIME_FROM','DATE_TO','TIME_TO'))
-  data.frame(crimedata[,-remove.cols],DT)   
-}
-
 
 
 ## getROC

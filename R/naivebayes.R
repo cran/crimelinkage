@@ -1,7 +1,5 @@
 ################################################################################
 ## Functions to run a histogram based naive bayes
-## ToDO: change inputs to X,Y,weights, ... or use formula interface
-
 ################################################################################
 
 ## naiveBayes
@@ -11,10 +9,18 @@
 #'  Fits a naive bayes model to continous and categorical/factor predictors.
 #'    Continous predictors are first binned, then estimates shrunk towards zero.
 ##  Inputs:
-#'  @param vars the names or column numbers of specific predictors.
-#'  @param X a data.frame of predictors, can include continuous and
-#'    categorical/factors along with \code{X$type} (linked or unlinked) and
-#'    \code{X$weight}
+#'  @param formula an object of class \code{\link{formula}} (or one that can be 
+#'    coerced to that class): a symbolic description of the model to be fitted. 
+#'    Only main effects (not interactions) are allowed. 
+#'  @param data data.frame of predictors, can include continuous and
+#'    categorical/factors along with a response vector (1 = linked, 0 = unlinked),
+#'    and (optionally) observation weights (e.g., \code{weight} column). 
+#'    The column names of data need to include the terms specified in \code{formula}.
+#'  @param X data frame of categorical and/or numeric variables
+#'  @param y binary vector indicating linkage (1 = linked, 0 = unlinked) or 
+#'         logical vector (TRUE = linked, FALSE = unlinked)
+#'  @param weights a vector of observation weights or the column name in 
+#'    \code{data} that corresponds to the weights.
 #'  @param df the degrees of freedom for each component density. if vector, each
 #'    predictor can use a different df
 #'  @param nbins the number of bins for continuous predictors
@@ -27,51 +33,103 @@
 #'  df approximate degrees of freedom. If partition=quantile, this does not
 #'  assume a continuous uniform prior over support, but rather a discrete uniform
 #'  over all (unlabeled) observations points.
+#' @seealso \code{\link{predict.naiveBayes}}, \code{\link{plot.naiveBayes}}
 #'  @examples
 #'  # See vignette: "Statistical Methods for Crime Series Linkage" for usage.  
 #'  @export
+#'  @name naiveBayes 
 ##==============================================================================
-naiveBayes <- function(vars,X,df=20,nbins=30,partition=c('quantile','width')){
-  partition = match.arg(partition)
-  nvars = length(vars)
-  df = rep(df,length=nvars)
-  BF = vector("list",nvars)
-  for(j in 1:nvars){
-    var = vars[j]
-    var.type = class(X[,var])
-    if(var.type %in% c('numeric','integer')){
-      bks = make.breaks(X[,var],partition,nbins=nbins)
-    } else  bks = NULL
-    BF[[j]] = getBF(X,var,breaks=bks,df=df[j])
-  }
-  names(BF) = vars
-  return(BF)
+NULL
+
+## naiveBayes
+##==============================================================================
+## Formula interface for naive Bayes classifier
+#' @rdname naiveBayes
+##==============================================================================
+naiveBayes <- function(formula,data,weights,df=20,nbins=30,partition=c('quantile','width')){
+  if (missing(data)) data = environment(formula)
+  mf = match.call(expand.dots = FALSE)
+  m = match(c("formula", "data", "weights"), names(mf), 0L)
+  mf = mf[c(1L, m)]
+  mf[[1L]] = quote(stats::model.frame)
+  mf = eval(mf, parent.frame())
+  mt = attr(mf, "terms")
+  if(any(attr(mt, "order") > 1)) stop("only main effects allowed. Modify formula.")  
+  x = mf[, attr(mt,"term.labels"), drop = FALSE]
+  y = model.response(mf)
+  weights = as.vector(model.weights(mf))
+  if (!is.null(weights) && !is.numeric(weights)) 
+      stop("'weights' must be a numeric vector")
+  if (!is.null(weights) && any(weights < 0)) 
+      stop("negative weights not allowed")
+  NB = naiveBayes.fit(x,y,weights,df=df,nbins=nbins,partition=partition)
+return(NB)
 }
 
 
-## predictNB
+## naiveBayes.fit
+##==============================================================================
+## Direct call to naive bayes classifier
+#' @rdname naiveBayes
+##==============================================================================
+naiveBayes.fit <- function(X,y,weights,df=20,nbins=30,partition=c('quantile','width')){
+  partition = match.arg(partition)
+  X = data.frame(X)
+  y = as.integer(y)
+  vars = colnames(X)
+  nvars = length(vars)
+  df = rep(df,length=nvars)
+  BF = vector("list",nvars)
+  if(missing(weights)) weights = rep(1,length(y))
+  for(j in 1:nvars){
+    var = vars[j]
+    x = X[,var,drop=TRUE]
+    if(class(x) %in% c('numeric','integer')){
+      bks = make.breaks(x,partition,nbins=nbins)
+    } else  bks = NULL
+    BF[[j]] = getBF(x,y,weights,breaks=bks,df=df[j]) 
+  }
+  names(BF) = vars
+  class(BF) = "naiveBayes"
+return(BF)
+}
+
+
+
+## predict.naiveBayes
 ##==============================================================================
 #'  Generate prediction (sum of log bayes factors) from a \code{naiveBayes} object
 ##  Inputs:
-#'  @param NB a naive bayes object from \code{\link{naiveBayes}}
-#'  @param X data.frame of new predictors, column names must match NB names
+#'  @param object a naive bayes object from \code{\link{naiveBayes}}
+#'  @param newdata data frame of new predictors, column names must match NB names
 #'  @param components (logical) return the log bayes factors from each component
 #'    or return the sum of log bayes factors
 #'  @param vars the names or column numbers of specific predictors. If NULL, then
 #'    all predictors will be used
+#'  @param \ldots not currently used    
 ##  Outputs:
 #'  @return BF if \code{components = FALSE}, the sum of log bayes factors, if
-#'    \code{components = TRUE} the component bayes factors (useful for plotting)
+#'    \code{components = TRUE} the component bayes factors (useful for plotting). 
+#'    
+#'    It will give a warning, but still produce output if X is missing predictors. 
+#'    The output in this situation will be based on the predictors that are in X. 
 ##  Notes:
 #'  @description This does not include the log prior odds, so will be off by a
-#'    constant
+#'    constant. 
+#'  @seealso \code{\link{naiveBayes}}, \code{\link{plot.naiveBayes}}  
 #'  @examples
 #'  # See vignette: "Statistical Methods for Crime Series Linkage" for usage.     
 #'  @export
-##  Make into S3 class
 ##==============================================================================
-predictNB <- function(NB,X,components=FALSE,vars=NULL){
+predict.naiveBayes <- function(object,newdata,components=FALSE,vars=NULL,...){
+  if(missing(newdata)) stop("newdata must be provided")
+  X = data.frame(newdata)
+  NB = object
   if(is.null(vars))  vars = names(NB)
+  missing.vars = !(vars %in% colnames(X))
+  if(any(missing.vars)) 
+    warning('The columns: ',paste(vars[missing.vars],collapse=','),' are missing from newdata')
+  vars = vars[!missing.vars]
   nvars = length(vars)
   BF = matrix(NA,nrow(X),nvars)
   for(j in 1:nvars){
@@ -85,16 +143,20 @@ predictNB <- function(NB,X,components=FALSE,vars=NULL){
 }
 
 
+
+
 ## getBF
 ##==============================================================================
 #'  Estimates the bayes factor for continous and categorical predictors.
 #'
 #'  Continous predictors are first binned, then estimates shrunk towards zero.
 ##  Inputs:
-#'  @param X data.frame of predictors, can include continuous and
-#'    categorical/factors along with X$type (linked or unlinked) and X$weight
-#'  @param var the names or column number of one specific predictor
-#'  @param breaks - set of break point for continuous predictors or NULL for
+#'  @param x predictor vector (continuous or categorical/factors)
+#'  @param y binary vector indicating linkage (1 = linked, 0 = unlinked) or 
+#'    logical vector (TRUE = linked, FALSE = unlinked)  
+#'  @param weights a vector of observation weights or the column name in 
+#'    \code{data} that corresponds to the weights. 
+#'  @param breaks set of break point for continuous predictors or NULL for
 #'    categorical or discrete
 #'  @param df the effective degrees of freedom for the cetegorical density
 #'    estimates
@@ -109,13 +171,12 @@ predictNB <- function(NB,X,components=FALSE,vars=NULL){
 #'  # See vignette: "Statistical Methods for Crime Series Linkage" for usage.     
 #'  @export
 ##==============================================================================
-getBF <- function(X,var,breaks=NULL,df=5){
+getBF <- function(x,y,weights,breaks=NULL,df=5){
   replaceNA <- function(x,r=0) as.numeric(ifelse(is.na(x),r,x))
-  linked = (X$type=='linked')
-  var = as.character(var)
-  var.type = class(X[,var])
-  x = X[,var]
-  weights = X$weight
+  if(is.data.frame(x)) stop("x must be a vector, not data frame")
+  linked = (as.integer(y)==1L)
+  var.type = class(x)      
+  if(missing(weights)) weights = rep(1,length(linked))
   if(var.type %in% c('numeric','integer')){
     n.bks = length(breaks)
     x = cut(x,breaks=breaks,include.lowest=TRUE)
@@ -152,11 +213,8 @@ getBF <- function(X,var,breaks=NULL,df=5){
   getP <- function(N,a) (N+a)/sum(N+a)
   E$p.linked = getP(E$N.linked,a.linked)
   E$p.unlinked = getP(E$N.unlinked,a.unlinked)
-  #E = transform(E,p.linked = getP(N.linked,a.linked),
-  #                p.unlinked = getP(N.unlinked,a.unlinked))
-  E$BF = with(E, p.linked/p.unlinked)
+  E$BF = E$p.linked/E$p.unlinked
   E[is.na(E$BF),'BF'] = 1           # Set 0/0=1
-  attr(E,'var') = var               # add variable name
   attr(E,'breaks') = breaks         # add breaks (or NULL)
   attr(E,'a') = c(linked=a.linked,unlinked=a.unlinked) # add shrinkage parameters
   attr(E,'df') = df
@@ -165,6 +223,9 @@ getBF <- function(X,var,breaks=NULL,df=5){
   attr(E,'type') = var.type
   return(E)
 }
+
+
+
 
 
 ## predictBF
@@ -245,16 +306,18 @@ make.breaks <- function(x,type='quantile',nbins=NULL,binwidth=NULL){
 #'  @param glwd1 linewidth of gridlines
 #'  @param glwd2 linewidth of gridlines
 #'  @param bkg.col color of plot background
+#'  @param grid.col color of grid lines
 #'  @param boxed (logical) should plot be boxed
 #'  @param \ldots other arguments passed to plot
 #'  @return makes a plot
 #'  @keywords internal
 ##==============================================================================
 plotBKG <- function(xlim,ylim,background=TRUE,x.minor,x.major,grid.lines=TRUE,
-                        glwd1=2,glwd2=1,bkg.col='grey90',boxed=TRUE,...){
+                    glwd1=2,glwd2=1,bkg.col='grey90',grid.col='white',
+                    boxed=TRUE,...){
   plot(xlim,ylim,typ='n',
        ylab='',xlab='',
-       col.axis='grey50',cex.axis=.8,tcl=-.25,las=1,...)
+       col.axis='grey50',cex.axis=.8,tcl=-.35,las=1,...)
   if(background){    # Add background color
     rng = par('usr')
     if(par('ylog')) rng[c(3,4)] = 10^(rng[c(3,4)])
@@ -262,9 +325,9 @@ plotBKG <- function(xlim,ylim,background=TRUE,x.minor,x.major,grid.lines=TRUE,
     rect(rng[1],rng[3],rng[2],rng[4],col=bkg.col,border="transparent")
   }
   if(grid.lines){
-    abline(h=axTicks(2),col = 'white',lty=1,lwd=glwd1)
-    if(missing(x.major))  abline(v=axTicks(1),col = 'white',lty=1,lwd=glwd1)
-    else                  abline(v=x.major   ,col = 'white',lty=1,lwd=glwd1)
+    abline(h=axTicks(2),col = grid.col,lty=1,lwd=glwd1)
+    if(missing(x.major))  abline(v=axTicks(1),col = grid.col,lty=1,lwd=glwd1)
+    else                  abline(v=x.major   ,col = grid.col,lty=1,lwd=glwd1)
     get.minor <- function(side=c(1,2)){  # return equal spaced minor axis
       xt = axTicks(side)
       nt = length(xt)
@@ -274,13 +337,63 @@ plotBKG <- function(xlim,ylim,background=TRUE,x.minor,x.major,grid.lines=TRUE,
       if(axlog) minor = 10^minor
     return(minor)
     }
-    if(missing(x.minor)) abline(v=get.minor(1),col = 'white',lty=1,lwd=glwd2)
-    else abline(v=x.minor,col='white',lty=1,lwd=glwd2)
-    abline(h=get.minor(2),col = 'white',lty=1,lwd=glwd2)
+    if(missing(x.minor)) abline(v=get.minor(1),col = grid.col,lty=1,lwd=glwd2)
+    else abline(v=x.minor,col=grid.col,lty=1,lwd=glwd2)
+    abline(h=get.minor(2),col = grid.col,lty=1,lwd=glwd2)
     if(boxed) box(col='grey50')
   }
 }
 
+
+## plot.naiveBayes
+##==============================================================================
+#'  Plots for Naive Bayes Model
+#'  
+#'  Plots (component) bayes factors from naiveBayes()
+#'  @param x a \code{\link{naiveBayes}} object
+#'  @param vars name or index of naive Bayes components to plot. Will plot all 
+#'    if blank.
+#'  @param log.scale (logical)
+#'  @param show.legend either a value or values indicating which plot to show 
+#'    the legend, or TRUE/FALSE to show or not show the legend on all plots.
+#'  @param cols Colors for plotting. First element is for linkage, second unlinked
+#'  @param \ldots arguemnts passed into \code{\link{plotBF}}
+#'  @return plots of Bayes factor from a naive Bayes model
+#'  @description This function attempts to plot all of the component plots in 
+#'    one window by using the mfrow argument of par. If more control is desired
+#'    then use \code{\link{plotBF}} to plot individual Bayes factors.
+#'  @seealso \code{\link{plotBF}}, \code{\link{naiveBayes}}, 
+#'    \code{\link{predict.naiveBayes}}  
+#'  @examples
+#'  # See vignette: "Statistical Methods for Crime Series Linkage" for usage.     
+#'  @export
+##==============================================================================
+plot.naiveBayes <- function(x,vars,log.scale=TRUE,show.legend=1,
+  cols = c(color('darkred',alpha=.75),color('darkblue',alpha=.75)),...){
+  if(missing(vars)) vars = names(NB)
+  NB = x
+  vars = intersect(vars,names(NB))
+  nvars = length(vars)
+  opar <- par(no.readonly = TRUE)
+  on.exit(par(opar))
+  if(nvars > 1){
+    par(mar=c(2,4,2,2),mgp = c(3, .75, 0))
+    if(nvars <= 2)       mfrow=c(1,2)
+    else if(nvars <= 4)  mfrow=c(2,2)
+    else if(nvars <= 6)  mfrow=c(2,3)
+    else if(nvars <= 9)  mfrow=c(3,3)
+    else if(nvars <= 12) mfrow=c(3,4)
+    else {mfrow=c(4,4);  warning("Too many components; use plotBF()")}
+    par(mfrow=mfrow)
+  }
+  for(j in 1:nvars){
+    var = vars[j]
+    show.leg = ( j %in% show.legend || isTRUE(show.legend))
+    plotBF(NB[[var]],log.scale=log.scale,show.legend=show.leg,cols=cols,...)
+    title(paste(var))
+  }
+invisible()  
+}
 
 ## plotBF
 ##==============================================================================
@@ -288,18 +401,19 @@ plotBKG <- function(xlim,ylim,background=TRUE,x.minor,x.major,grid.lines=TRUE,
 #'  @param BF Bayes Factor
 #'  @param log.scale (logical)
 #'  @param show.legend (logical)
-#'  @param x.rng range of x-axis
+#'  @param xlim range of x-axis
 #'  @param ylim range of y-axis
 #'  @param cols Colors for plotting. First element is for linkage, second unlinked
 #'  @param \ldots arguemnts passed into \code{\link{plotBKG}}
 #'  @return plot of Bayes factor
+#'  @seealso \code{\link{plot.naiveBayes}}, \code{\link{plotBKG}}
 #'  @examples
 #'  # See vignette: "Statistical Methods for Crime Series Linkage" for usage.     
 #'  @export
 ##==============================================================================
-plotBF <- function(BF,log.scale=TRUE,show.legend=TRUE,x.rng,ylim,
+plotBF <- function(BF,log.scale=TRUE,show.legend=TRUE,xlim,ylim=NULL,
   cols = c(color('darkred',alpha=.75),color('darkblue',alpha=.75)),...){
-  if(missing(ylim)){
+  if(missing(ylim) || is.null(ylim)){
     ylim = range(BF$BF,na.rm=TRUE,finite=TRUE)
     if(log.scale) ylim = c(-1,1)*min(12,max(abs(log(ylim))))
   }
@@ -309,11 +423,11 @@ plotBF <- function(BF,log.scale=TRUE,show.legend=TRUE,x.rng,ylim,
     xx = c(BF$from[1],BF$to)
     yy = c(BF$BF,BF$BF[n]) # Add extra line for step plotting
     if(log.scale) yy = log(yy)
-    if(missing(x.rng))  x.rng = range(xx,na.rm=TRUE,finite=TRUE)
-    plotBKG(x.rng,ylim,...)
+    if(missing(xlim))  xlim = range(xx,na.rm=TRUE,finite=TRUE)
+    plotBKG(xlim,ylim,...)
     title(ylab=ifelse(log.scale,'log(BF)','BF'))
     baseline = ifelse(log.scale,0,1)
-    segments(x.rng[1],baseline,x.rng[2],baseline)
+    segments(xlim[1],baseline,xlim[2],baseline)
     y.thres = ifelse(log.scale,0,1)
     rect(xx[-(n+1)], y.thres, xx[-1], yy[-(n+1)],
       col=ifelse(yy>y.thres,cols[1],cols[2]),border=NA)
@@ -323,7 +437,7 @@ plotBF <- function(BF,log.scale=TRUE,show.legend=TRUE,x.rng,ylim,
     else BF = transform(BF,logBF=log(BF))
     mp = barplot(BF$logBF,names.arg=BF$value,plot=FALSE)
     xadd = diff(mp)[1]/2 # .2
-    plotBKG(c(min(mp)-xadd,max(mp)+xadd),ylim,xaxt='n',yaxt='n',x.major=NULL,x.minor=mp)
+    plotBKG(c(min(mp)-xadd,max(mp)+xadd),ylim,xaxt='n',yaxt='n',x.major=NULL,x.minor=mp,...)
     barplot(BF$logBF,names.arg=BF$value,
             cex.names=.9,
             col=ifelse(BF$logBF>0,cols[1],cols[2]),
@@ -358,6 +472,7 @@ rankBF <- function(BF,n=10,thres=NULL){
 #'  @param col Color that \R recognizes (names or number)
 #'  @param alpha transparency value
 #'  @seealso \code{\link{col2rgb}}
+#'  @importFrom grDevices col2rgb rgb 
 #'  @keywords internal
 ##==============================================================================
 color <- function(col,alpha=NULL){
